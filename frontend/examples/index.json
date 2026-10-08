@@ -1,0 +1,22 @@
+[
+ {
+  "id": "el_chalten_escarpe_oeste",
+  "title": "El Chaltén — flujo de detritos desde el escarpe oeste (hipotético)",
+  "file": "el_chalten.json"
+ },
+ {
+  "id": "laguna_torre_glof",
+  "title": "Laguna Torre → Río Fitz Roy → El Chaltén — GLOF por colapso del Glaciar Grande (hipotético)",
+  "file": "laguna_torre_glof.json"
+ },
+ {
+  "id": "laguna_torre_deslizamiento_lluvia",
+  "title": "Laguna Torre → Río Fitz Roy → El Chaltén — deslizamiento de la ladera sur por lluvias y GLOF (hipotético)",
+  "file": "laguna_torre_deslizamiento_lluvia.json"
+ },
+ {
+  "id": "dique_los_sauces_rotura",
+  "title": "Dique Los Sauces → Río Los Sauces → La Rioja — rotura del paredón por sobrecarga (hipotético)",
+  "file": "dique_los_sauces.json"
+ }
+]

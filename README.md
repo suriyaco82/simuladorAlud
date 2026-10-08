@@ -1,0 +1,120 @@
+# Suriyaco MassFlow 3D — v0.2
+
+Prototipo para simular movimientos de masa sobre un DEM. Incluye:
+
+- **Zona de cálculo dibujada en el mapa**: se arrastra un rectángulo o se toma la vista actual. También se pueden editar las coordenadas.
+- **Área de desprendimiento dibujada en el mapa** (polígono). La masa se define por espesor medio o por volumen total, con perfil uniforme o en domo. El DEM pre-evento contiene la masa, así que el volumen es real y queda la cicatriz.
+- **Solver MLS-MPM 3D en CPU o GPU** (Taichi: Metal, CUDA, Vulkan o LLVM):
+  - elastoplasticidad Drucker-Prager
+  - mezcla sólido-agua (saturación, densidad, viscosidad)
+  - **presión de poros** que evoluciona por disipación y por contracción/dilatancia, y reduce la fricción interna y basal
+  - **erosión (entrainment)** que baja el lecho e incorpora material
+  - **deposición**.
+- **Motor rápido de partículas** (el de v0.1) para previsualizar.
+- **Visor 3D**:
+  - exageración vertical en vivo
+  - reproducción interpolada, línea de tiempo y velocidad
+  - partículas coloreadas por velocidad, presión de poros u origen
+  - capas de depósito, cambio neto, erosión, profundidad y velocidad máximas, presión de poros y tiempo de arribo, también superpuestas en el mapa.
+- **Vista realista**: terreno con imagen satelital, cielo y sombras; superficie del flujo reconstruida desde las partículas; bloques 3D que ruedan; polvo en frentes secos y rápidos. El aspecto se ajusta al material (roca, suelo, detritos, barro) y el material erosionado se ve con color de sedimento. La cámara puede seguir al flujo. Es una representación visual: el tamaño de los bloques no es un resultado del modelo.
+- Mapas base: satélite, OSM y topográfico. Integración con OpenTopography (`COP30`, `ANADEM`, `NASADEM`, `AW3D30`, `SRTM_GL1`) y DEM sintético sin credenciales.
+- Las simulaciones corren como *jobs* en un proceso aparte, con progreso y cancelación.
+
+- **Análisis de exposición**: cruza el resultado con zonas urbanas y edificios. Calcula la superficie afectada por intensidad (alta, media, baja), la profundidad, velocidad y presión dinámica (ρv²), el tiempo de arribo y los edificios alcanzados. Las zonas urbanas no se erosionan.
+- **Escenarios en cascada (GLOF)**: varios cuerpos con material propio (hielo, roca, **agua libre**) en la misma grilla MPM, lagos nivelados, cauces grabados en el DEM, zonas erosionables propias, **brecha prescrita** de morena, resistencia turbulenta de Voellmy/Manning y **estaciones de aforo** con hidrogramas.
+- **Ejemplos precargados**: escenarios completos que se cargan con un clic:
+  - [El Chaltén — flujo de detritos desde el escarpe oeste (hipotético)](docs/EJEMPLO_EL_CHALTEN.md), con 1212 edificios de OpenStreetMap.
+  - [Laguna Torre → Río Fitz Roy → El Chaltén — GLOF por colapso del Glaciar Grande (hipotético)](docs/EJEMPLO_GLOF_LAGUNA_TORRE.md).
+  - [Laguna Torre → Río Fitz Roy → El Chaltén — deslizamiento de la ladera sur por lluvias y GLOF (hipotético)](docs/EJEMPLO_DESLIZAMIENTO_LLUVIA_LAGUNA_TORRE.md), con datos del Glaciar Torre de Schmidt, Winocur y Pitte (2023).
+  - [Dique Los Sauces → Río Los Sauces → La Rioja — rotura del paredón por sobrecarga (hipotético)](docs/EJEMPLO_DIQUE_LOS_SAUCES.md).
+
+- **Deslizamiento disparado por lluvia**: una masa puede definirse por una *zona de búsqueda* y la lluvia acumulada (mm, días, deshielo) en lugar de un volumen fijo. El volumen sale de un modelo de talud infinito + SHALSTAB (Montgomery y Dietrich 1994) sobre el DEM: la lluvia infiltrada fluye ladera abajo, satura las hondonadas y fallan las celdas con FS < 1. El panel *Desencadenante: lluvia* muestra en el mapa qué se desprende, el volumen y la lluvia crítica antes de simular (`POST /api/trigger/preview`).
+- **Editor de escenarios y datos de campo** (botón "✎ Editar datos / cargar datos de campo" en Ejemplos): trae todos los valores del ejemplo elegido, incluidos los que no están en el formulario (masas iniciales, lagos, diques y vertederos, brecha, cauces, zonas erosionables, estaciones de aforo, zonas expuestas y edificios). Indica de dónde viene cada valor (ejemplo, formulario, editado o por defecto) y lista los **datos faltantes**. Las geometrías se editan pegando coordenadas `[lon, lat]` (GPS/SIG) o dibujándolas en el mapa. El escenario editado se aplica, se simula, se descarga como JSON o se **guarda como escenario nuevo** (★ en la lista; el original no se modifica).
+- **Edificios de GlobalBuildingAtlas** (GBA LoD1, Zhu et al. 2025, TUM): huellas y alturas por edificio, leídas solo para la zona de cálculo desde la versión GeoParquet de [Source Cooperative](https://source.coop/tge-labs/globalbuildingatlas-lod1) y guardadas en `cache/buildings/`. Se pueden usar para completar alturas de los edificios del ejemplo, sumar edificios faltantes o reemplazarlos. GBA no tiene alturas en toda la Patagonia (en El Chaltén las huellas vienen sin altura).
+- **Planilla de campo de edificios (CSV)**: exportar, completar en campo (altura, pisos, uso, estructura, notas) y volver a importar. Cada fila se asocia por `id` o al edificio más cercano (≤ 15 m), o se agrega como nuevo. La altura de campo tiene prioridad sobre GBA. Con alturas conocidas, el impacto informa cuántos edificios tienen un flujo más profundo que la mitad o que toda su altura.
+
+Detalles del modelo y verificación: [docs/MODEL.md](docs/MODEL.md).
+
+## Importante
+
+El solver MPM está **verificado** contra soluciones analíticas simples (`python -m backend.validation`), pero **NO está validado ni calibrado** contra eventos reales, y no sustituye RAMMS, DAN3D, r.avaflow, OpenFOAM, MPM científico u otros modelos calibrados. Sirve para explorar escenarios. No debe usarse para alertas, evacuaciones, diseño de obra o zonificación oficial.
+
+## Requisitos
+
+- Python 3.11+ recomendado (Taichi 1.7 soporta hasta 3.12)
+- GPU opcional: Metal (macOS), CUDA o Vulkan. Sin GPU se usa la CPU
+- Conexión a Internet para mapas base / librerías JS y OpenTopography
+
+## Arranque rápido (macOS/Linux)
+
+```bash
+cd suriyaco_massflow3d
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn backend.app:app --reload --port 8000
+```
+
+En otra terminal:
+
+```bash
+cd suriyaco_massflow3d/frontend
+python3 -m http.server 8080
+```
+
+Abrir: `http://127.0.0.1:8080`
+
+El modo `SYNTHETIC` funciona sin API Key.
+
+## OpenTopography
+
+Configurá la clave solo en el backend:
+
+```bash
+export OPENTOPOGRAPHY_API_KEY="TU_CLAVE"
+uvicorn backend.app:app --reload --port 8000
+```
+
+Nunca incrustes una clave personal en el frontend. Para integración comercial/multiusuario, verificá las condiciones vigentes de OpenTopography y su modalidad Enterprise.
+
+## API
+
+- `GET /api/health`, `GET /api/datasets`, `GET /api/capabilities`
+- `POST /api/dem/download`
+- `POST /api/buildings/gba` (body: bbox) → edificios de GlobalBuildingAtlas `{buildings: [{lon, lat, area, height, source}], count, with_height}`
+- `POST /api/examples` (body: `{example}`) → guarda un escenario editado en `frontend/examples/` y lo agrega a `index.json`
+- `POST /api/simulate` → crea un job: `{id, status, ...}`
+- `GET /api/jobs/{id}` → estado y progreso · `DELETE /api/jobs/{id}` → cancelar
+- `GET /api/jobs/{id}/result` → metadatos y resumen (JSON) · `GET /api/jobs/{id}/data.bin` → cuadros y campos (binario)
+- Swagger: `http://127.0.0.1:8000/docs` (lista todos los parámetros con sus rangos)
+
+### Ejemplo /api/simulate
+
+```json
+{
+  "bbox": {"west": -66.96, "south": -29.41, "east": -66.89, "north": -29.34},
+  "dataset": "SYNTHETIC",
+  "engine": "mpm",
+  "device": "auto",
+  "release_polygon": [[-66.93, -29.366], [-66.925, -29.366], [-66.925, -29.371], [-66.93, -29.371]],
+  "release_mode": "volume",
+  "release_volume_m3": 1500000,
+  "friction_angle_deg": 32,
+  "basal_friction_deg": 16,
+  "saturation": 0.6,
+  "erodible_depth_m": 2,
+  "dx": 20,
+  "duration_s": 120
+}
+```
+
+## Próxima etapa científica recomendada
+
+Hecho en v0.2: área de rotura, volumen y espesor variables, erosión y deposición, presión de poros y MPM 3D en CPU/GPU.
+
+1. Importación de inventarios de deslizamientos y de mapas de espesor o de lecho erosionable (GeoTIFF/GeoJSON).
+2. Reologías adicionales: μ(I), Voellmy-Salm, Bingham/Herschel-Bulkley, cohesión.
+3. MPM bifásico (sólido + agua con drenaje real) y consolidación.
+4. Calibración contra eventos históricos argentinos y métricas runout/área/tiempo de llegada.
+5. Mapas de intensidad, profundidad, velocidad, presión dinámica y tiempo de llegada.
+6. Exportación GeoTIFF/GeoJSON/KML y reportes reproducibles.
