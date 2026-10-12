@@ -6,25 +6,24 @@ import {Exposure, INTENSITY_COLORS, listExamples, fetchExample} from './exposure
 import {ScenarioEditor} from './editor.js';
 import {ic, hydrateIcons} from './icons.js';
 import {RainPanel} from './rain.js';
+import {BasinsPanel, floodBasinsHTML, FLOW} from './basins.js';
+import {RAMPS, hexRGB} from './palette.js';
+import {ImpactZones} from './zones.js';
+import {LibraryPanel, loadAnalysis} from './library.js';
+import {buildReport, buildComparison, DocViewer} from './report.js';
+import {Wizard} from './wizard.js';
 
-const API = 'http://127.0.0.1:8000';
+// Servido por el backend (Render, uvicorn): mismo origen. Servidor estático aparte (dev en :8080): backend local.
+const API = location.port === '8080' || location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';
 const $ = id => document.getElementById(id);
 const fmt = (v, d = 1) => v == null || !isFinite(v) ? '—' : Number(v).toLocaleString('es-AR', {maximumFractionDigits: d});
 const fmtVol = v => v == null ? '—' : v >= 1e6 ? fmt(v / 1e6, 2) + ' M m³' : fmt(v, 0) + ' m³';
 const fmtArea = a => a >= 1e6 ? fmt(a / 1e6, 2) + ' km²' : fmt(a / 1e4, 1) + ' ha';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const align4 = n => (n + 3) & ~3;
 const metersPerDeg = lat => ({mx: 111320 * Math.max(0.1, Math.cos(lat * Math.PI / 180)), my: 110540});
 
 // ───────────────────────────── Paletas
-const RAMPS = {
-  speed: ['#39a8ff', '#41e280', '#ffe55c', '#ff8a3d', '#e847ff'],
-  depth: ['#320a5e', '#781c6d', '#bc3754', '#ed6925', '#fbb61a', '#fcffa4'],
-  pore: ['#2b83ba', '#abdda4', '#ffffbf', '#fdae61', '#d7191c'],
-  diverging: ['#2166ac', '#67a9cf', '#d1e5f0', '#f2f2f2', '#fddbc7', '#ef8a62', '#b2182b'],
-  arrival: ['#fde725', '#5ec962', '#21918c', '#3b528b', '#5a2d82'],
-  relief: ['#2f4a2c', '#5b6b3a', '#8a7a55', '#a89a84', '#d8d4cc'],
-  intensity: ['#ffe066', '#ff9f1c', '#d62828'],
-};
 function makeLUT(stops) {
   const cs = stops.map(s => new THREE.Color(s));  // hex sRGB -> espacio lineal de trabajo
   const lut = new Float32Array(256 * 3);
@@ -38,7 +37,6 @@ function makeLUT(stops) {
 const LUT = Object.fromEntries(Object.entries(RAMPS).map(([k, v]) => [k, makeLUT(v)]));
 const lutIndex = t => Math.max(0, Math.min(255, Math.round(t * 255))) * 3;
 const gradientCSS = stops => `linear-gradient(90deg,${stops.join(',')})`;
-const hexRGB = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 
 const LAYERS = {
   deposit:    {name: 'Espesor de depósito', unit: 'm', ramp: 'depth', mask: v => v > 0.05},
@@ -51,6 +49,9 @@ const LAYERS = {
   current:    {name: 'Espesor actual del flujo', unit: 'm', ramp: 'depth', mask: v => v > 0.2, dynamic: true},
   intensity:  {name: 'Intensidad (flujo de detritos)', unit: '', ramp: 'intensity', mask: v => v >= 1, fixed: [1, 3], cats: ['baja', 'media', 'alta']},
   max_pressure: {name: 'Presión dinámica máx. ρv²', unit: 'kPa', ramp: 'depth', mask: v => v > 0.1},
+  max_cv:     {name: 'Concentración de sedimento máx. Cv', unit: '', ramp: 'pore', mask: v => v > 0.01, fixed: [0, 0.6]},
+  max_hv:     {name: 'h·v máx.', unit: 'm²/s', ramp: 'depth', mask: v => v > 0.05},
+  runoff_total: {name: 'Lluvia efectiva (escorrentía)', unit: 'mm', ramp: 'arrival', mask: v => v > 0.5, always: true},
 };
 
 // ───────────────────────────── Mapa
@@ -72,8 +73,55 @@ baseLayers['Imágenes (Esri)'].addTo(map);
 L.control.layers(baseLayers, refLayers).addTo(map);
 L.control.scale({imperial: false}).addTo(map);
 
+// Divisor arrastrable entre el mapa y la vista 3D; el tamaño elegido se recuerda en este navegador
+(() => {
+  const sec = $('split').parentElement, bar = $('split');
+  const set = pct => {
+    pct = Math.max(12, Math.min(88, pct));
+    sec.style.setProperty('--split', pct + '%');
+    bar.setAttribute('aria-valuenow', Math.round(pct));
+    map.invalidateSize({pan: false});
+    return pct;
+  };
+  const save = pct => { try { localStorage.setItem('splitPct', String(pct)); } catch { /* sin almacenamiento */ } };
+  try { const v = parseFloat(localStorage.getItem('splitPct')); if (v) set(v); } catch { /* sin almacenamiento */ }
+  let last = 42;
+  const move = e => { const r = sec.getBoundingClientRect(); last = set((e.clientY - r.top) / r.height * 100); };
+  const up = () => {
+    document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+    bar.classList.remove('on'); document.body.classList.remove('splitting'); save(last);
+  };
+  bar.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    bar.classList.add('on'); document.body.classList.add('splitting');
+    document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+  });
+  bar.addEventListener('dblclick', () => save(last = set(42)));
+  bar.addEventListener('keydown', e => {
+    const cur = parseFloat(getComputedStyle(sec).getPropertyValue('--split')) || 42;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); save(last = set(cur + (e.key === 'ArrowUp' ? -4 : 4))); }
+  });
+})();
+
 let rectangle = null, marker = null, releasePoly = null, releaseOutline = null, overlay = null;
 let drawMode = null, suppressClick = false;
+
+// ───────────────────────────── Asistente de pasos (ventana flotante); la barra lateral queda para los resultados
+const wizard = new Wizard({
+  isFlood: () => $('engine').value === 'flood',
+  onRun: () => $('run').click(),
+  hints: {
+    start: () => exposure.example && !exposure.example.free ? exposure.example.title : 'Modo libre (sin ejemplo)',
+    zone: () => `${$('dataset').value} · ${$('gridInfo').textContent.split('Zona grande')[0]}`,
+    release: () => $('releaseInfo').innerHTML.replace(/<br\s*\/?>/g, ' · ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 90),
+    basins: () => { const st = basinsPanel.params().storm; return `Tormenta ${fmt(st.rain_mm ?? 60, 0)} mm en ${fmt(st.duration_h ?? 3, 2)} h · ${basinsPanel.data ? 'cuencas delineadas' : 'falta delinear las cuencas'}`; },
+    material: () => $('preset').selectedOptions[0] && $('preset').selectedOptions[0].text,
+    water: () => `Saturación ${(+$('saturation').value).toFixed(2)}`,
+    erosion: () => { const v = +document.querySelector('[data-param=erodible_depth_m]').value; return v > 0 ? `Lecho erosionable de ${fmt(v)} m` : 'Sin erosión del lecho'; },
+    run: () => `${$('engine').selectedOptions[0].text} · dx ${$('dx').value} m${$('anaName').value.trim() ? ' · ' + $('anaName').value.trim() : ''}`,
+  },
+});
 
 const bbox = () => ({west: +$('west').value, south: +$('south').value, east: +$('east').value, north: +$('north').value});
 
@@ -95,14 +143,18 @@ function updateGridInfo() {
   if (!(Lx > 0 && Ly > 0)) { $('gridInfo').textContent = 'BBox inválido'; return; }
   const nx = Math.floor(Lx / dx) + 1, ny = Math.floor(Ly / dx) + 1;
   $('gridInfo').innerHTML = `${fmt(Lx / 1000, 2)} × ${fmt(Ly / 1000, 2)} km · ${fmt(nx, 0)} × ${fmt(ny, 0)} columnas (dx ${dx} m)` +
-    (nx * ny > 250000 ? '<br><span style="color:#f4b64c">Zona grande: el backend puede aumentar dx para respetar la memoria.</span>' : '');
+    (nx * ny > ($('engine').value === 'flood' ? 450000 : 250000) ? '<br><span style="color:#f4b64c">Zona grande: el backend puede aumentar dx para respetar la memoria.</span>' : '');
 }
 ['west', 'east', 'south', 'north'].forEach(id => $(id).addEventListener('change', () => drawBox()));
 $('dx').addEventListener('input', updateGridInfo);
 
 function setMode(m) {
   if (drawMode === 'poly' && m !== 'poly') cancelDraft();
+  if (drawMode === 'bbox' && m !== 'bbox') resetRect();
+  if (m === 'bbox') status('Zona de cálculo: arrastrá sobre el mapa, o hacé clic en dos esquinas opuestas.');
+  if (m === 'poly' && !polyTarget) status('Área de desprendimiento: clic en el mapa agrega vértices; doble clic, Enter o clic en el primer vértice cierra; Esc cancela.');
   drawMode = m;
+  wizard.drawing(!!m);
   $('map').classList.toggle('drawing', !!m);
   $('drawBox').classList.toggle('active', m === 'bbox');
   $('drawPoly').classList.toggle('active', m === 'poly');
@@ -116,10 +168,11 @@ $('viewBox').onclick = () => {
   setBBox({west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth()}, false);
 };
 
-// Rectángulo arrastrando
-let dragStart = null, dragRect = null;
+// Rectángulo: arrastrando, o con un clic en cada esquina
+let dragStart = null, dragRect = null, cornerPlaced = false;
+function resetRect() { if (dragRect) dragRect.remove(); dragStart = dragRect = null; cornerPlaced = false; }
 map.on('mousedown', e => {
-  if (drawMode !== 'bbox') return;
+  if (drawMode !== 'bbox' || dragStart) return;
   dragStart = e.latlng;
   dragRect = L.rectangle(L.latLngBounds(e.latlng, e.latlng), {color: '#f4b64c', weight: 2, dashArray: '5 4', fillOpacity: .05}).addTo(map);
 });
@@ -130,10 +183,14 @@ map.on('mousemove', e => {
 map.on('mouseup', e => {
   if (drawMode !== 'bbox' || !dragStart) return;
   const b = L.latLngBounds(dragStart, e.latlng);
-  dragStart = null; dragRect.remove(); dragRect = null;
   suppressClick = true; setTimeout(() => { suppressClick = false; }, 60);
   const p1 = map.latLngToContainerPoint(b.getSouthWest()), p2 = map.latLngToContainerPoint(b.getNorthEast());
-  if (Math.abs(p1.x - p2.x) < 8 || Math.abs(p1.y - p2.y) < 8) return;
+  if (Math.abs(p1.x - p2.x) < 8 || Math.abs(p1.y - p2.y) < 8) {
+    // clic sin arrastrar: queda fijada la primera esquina, el rectángulo sigue al cursor hasta el segundo clic
+    if (!cornerPlaced) { cornerPlaced = true; status('Primera esquina marcada: hacé clic en la esquina opuesta (Esc cancela).'); }
+    return;
+  }
+  resetRect();
   setMode(null);
   setBBox({west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth()}, false);
 });
@@ -175,6 +232,7 @@ map.on('dblclick', e => { if (drawMode === 'poly') { L.DomEvent.stop(e); finishP
 map.on('click', e => {
   if (suppressClick) { suppressClick = false; return; }
   if (editor.capturesMapClicks) return;
+  if (basinsPanel.capturesMapClicks) { basinsPanel.addOutlet(e.latlng); return; }
   if (drawMode === 'poly') { addVertex(e.latlng); return; }
   if (drawMode) return;
   if (marker) marker.remove();
@@ -182,6 +240,7 @@ map.on('click', e => {
   updateReleaseInfo();
 });
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && basinsPanel.capturesMapClicks) basinsPanel.setPicking(false);
   if (!drawMode || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   if (e.key === 'Escape') setMode(null);
   if (drawMode === 'poly' && e.key === 'Enter') finishPoly();
@@ -239,6 +298,37 @@ fetch(API + '/api/capabilities').then(r => r.json()).then(c => {
   }
 }).catch(() => status('Backend no disponible en ' + API, true));
 
+// ───────────────────────────── Edificios de GlobalBuildingAtlas para la zona actual
+function updateGbaInfo() {
+  const B = exposure.buildings || [];
+  $('gbaClear').hidden = !B.length;
+  const wh = B.filter(b => b.height > 0).length;
+  $('gbaInfo').innerHTML = B.length ? `${fmt(B.length, 0)} edificios (${fmt(wh, 0)} con altura). Al simular se pintan según la intensidad del flujo que los alcanza: ` +
+    `<span class="sw" style="background:${INTENSITY_COLORS[1]};margin-left:0"></span>baja <span class="sw" style="background:${INTENSITY_COLORS[2]}"></span>media <span class="sw" style="background:${INTENSITY_COLORS[3]}"></span>alta` : '';
+}
+$('gbaLoad').onclick = async () => {
+  const b = bbox(), btn = $('gbaLoad');
+  btn.disabled = true;
+  $('gbaInfo').innerHTML = ic('refresh', 16, 'spin') + ' Descargando GlobalBuildingAtlas para la zona… (la primera vez puede tardar hasta un minuto)';
+  try {
+    const r = await fetch(API + '/api/buildings/gba', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(b)});
+    if (!r.ok) throw new Error(await errText(r));
+    const j = await r.json();
+    exposure.setBuildings(j.buildings.map((g, n) => ({id: 'g' + (n + 1), lon: g.lon, lat: g.lat, area: g.area, levels: null,
+      height: g.height, hsrc: g.height ? 'GBA' : null, src: g.source})));
+    if (exposure.example.free) $('exClear').hidden = false;
+    updateGbaInfo();
+    status(`GlobalBuildingAtlas: ${fmt(j.count, 0)} edificios en la zona (${fmt(j.with_height, 0)} con altura).`);
+  } catch (e) {
+    $('gbaInfo').textContent = 'No se pudieron cargar los edificios: ' + e.message;
+  } finally { btn.disabled = false; }
+};
+$('gbaClear').onclick = () => {
+  if (exposure.example && exposure.example.free) { exposure.clear(); $('exClear').hidden = true; }
+  else if (exposure.example) exposure.setBuildings([]);
+  updateGbaInfo();
+};
+
 // ───────────────────────────── Ejemplos precargados
 let examples = [];
 async function refreshExamples(select) {
@@ -268,7 +358,7 @@ async function applyExample(run) {
   if (!e) { status('Elegí un ejemplo de la lista.', true); return; }
   loadExample(await fetchExample(e.file), run);
 }
-function loadExample(ex, run) {
+function loadExample(ex, run, quiet = false) {
   const p = ex.params;
   setMode(null);
   setBBox(p.bbox, false);
@@ -286,6 +376,9 @@ function loadExample(ex, run) {
   if (marker) { marker.remove(); marker = null; }
   exposure.set(ex);
   rainPanel.refresh();
+  basinsPanel.load(p);
+  updateGbaInfo();
+  applyEngine();
   setRelease(p.release_polygon ? p.release_polygon.map(([lo, la]) => L.latLng(la, lo)) : null);
   $('exClear').hidden = false;
   const v = ex.view || {};
@@ -295,7 +388,7 @@ function loadExample(ex, run) {
   if (v.layer) pendingLayer = v.layer;
   if (v.mapLayer) $('mapLayer').value = v.mapLayer;
   updateGridInfo(); updateReleaseInfo();
-  status(`Ejemplo cargado: <b>${ex.title}</b>`);
+  if (!quiet) status(`Ejemplo cargado: <b>${ex.title}</b>`);
   if (run) $('run').click();
 }
 let pendingLayer = null;
@@ -310,6 +403,49 @@ const rainPanel = new RainPanel({
   onZone: () => { exposure.set(exposure.example); updateReleaseInfo(); },
   startDraw: cb => { polyTarget = cb; setMode('poly'); status('Dibujá la zona de búsqueda del deslizamiento: clic agrega vértices, doble clic o Enter cierra.'); },
 });
+
+// ───────────────────────────── Cuencas y tormenta (motor de inundación por lluvia)
+const basinsPanel = new BasinsPanel({
+  api: API, map, sec: $('basinSec'), body: $('basinBody'), status,
+  getParams: () => collectParams(),
+  isDrawing: () => !!drawMode,
+  hasUrbanZone: () => {
+    try { return !!(exposure.example && (exposure.example.params.exposure || []).some(z => (z.polygon || []).length >= 3)); }
+    catch { return false; }  // al iniciar, el módulo de exposición todavía no existe
+  },
+  startDraw: cb => { polyTarget = cb; setMode('poly'); status('Zona urbana: clic en el mapa agrega vértices; doble clic, Enter o clic en el primer vértice cierra; Esc cancela.'); },
+});
+const isFlood = () => $('engine').value === 'flood';
+// el motor de inundación no usa desprendimiento, material ni partículas: se muestran solo sus controles
+function applyEngine() {
+  const fl = isFlood();
+  basinsPanel.setVisible(fl);
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', (b.dataset.mode === 'flood') === fl));
+  $('basinSec').hidden = !fl;
+  for (const id of ['releaseSec', 'materialSec', 'aguaSec', 'erosionSec']) $(id).hidden = fl;
+  if (fl) $('rainSec').hidden = true; else rainPanel.refresh();
+  for (const k of ['device', 'ppc', 'duration_s', 'display_particles'])
+    document.querySelector(`[data-param="${k}"]`).closest('label').hidden = fl;
+  if (!fl && basinsPanel.capturesMapClicks) basinsPanel.setPicking(false);
+  if (!result) $('empty').textContent = fl ? 'Dibujá la zona de cálculo, delineá las cuencas y definí la tormenta, luego Simular.'
+    : 'Dibujá la zona y el área de desprendimiento, luego Simular.';
+  updateGridInfo();
+}
+// selector de tipo de simulación (arriba de la barra lateral): elige el motor
+document.querySelectorAll('.mode-btn').forEach(b => b.onclick = () => {
+  const fl = b.dataset.mode === 'flood';
+  if (fl === isFlood()) { wizard.show(); return; }
+  $('engine').value = fl ? 'flood' : ($('engine').querySelector('option[value=mpm]').disabled ? 'particles' : 'mpm');
+  // las cuencas necesitan el terreno real: el DEM sintético es un relieve inventado
+  if (fl && $('dataset').value === 'SYNTHETIC') {
+    $('dataset').value = 'AWS_TERRAIN';
+    toast('info', 'DEM cambiado a AWS_TERRAIN', 'Las cuencas se delinean sobre el terreno real. El DEM SYNTHETIC es un relieve de prueba que no corresponde al lugar del mapa.', [], 8000);
+  }
+  applyEngine();
+  wizard.show('start');
+});
+$('engine').addEventListener('change', applyEngine);
+$('engine').addEventListener('input', applyEngine);
 
 // ───────────────────────────── Editor del escenario (datos de campo)
 const editor = new ScenarioEditor({
@@ -341,7 +477,7 @@ $('exEdit').onclick = async () => {
     status(loaded ? 'Editor abierto con los valores actuales del formulario.' : 'Editor abierto con los valores del ejemplo.');
   } catch (err) { status('No se pudo abrir el editor: ' + err.message, true); $('status').scrollIntoView({block: 'center'}); }
 };
-$('exClear').onclick = () => { exposure.clear(); rainPanel.clear(); $('exClear').hidden = true; $('exampleSel').value = ''; $('exInfo').textContent = ''; updateReleaseInfo(); };
+$('exClear').onclick = () => { exposure.clear(); rainPanel.clear(); updateGbaInfo(); $('exClear').hidden = true; $('exampleSel').value = ''; $('exInfo').textContent = ''; updateReleaseInfo(); };
 
 // ───────────────────────────── Jobs
 let job = null, pollTimer = null, result = null;
@@ -376,7 +512,7 @@ const runUI = {
   update(s) {
     const pr = s.progress || {}, pct = pr.t != null ? Math.min(100, pr.t / s.duration_s * 100) : null;
     this.show(s.stage || s.status, pct);
-    $('rcE').textContent = s.engine === 'mpm' ? 'MPM 3D' : 'Partículas';
+    $('rcE').textContent = {mpm: 'MPM 3D', particles: 'Partículas', flood: 'Inundación 2D'}[s.engine] || s.engine;
     if (pr.t != null) {
       $('rcT').textContent = `${fmtDur(pr.t)} / ${fmtDur(s.duration_s)}`;
       $('rcN').textContent = fmt(pr.particles, 0);
@@ -433,13 +569,16 @@ function osNotify(title, body) {
   if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification(title, {body});
 }
 function runFinished(meta, wall) {
-  const s = meta.summary, ex = meta.exposure && meta.exposure.points;
-  const body = `${meta.scenario_name ? `<b>${meta.scenario_name}</b><br>` : ''}Cómputo ${fmtDur(wall ?? s.wall_time_s)} · alcance ${fmt(s.runout_m, 0)} m · ` +
-    `v máx. ${fmt(s.max_speed_m_s, 1)} m/s · depósito ${fmtVol(s.deposit_volume_m3)}` +
+  const s = meta.summary, ex = meta.exposure && meta.exposure.points, ft = meta.flood && meta.flood.totals;
+  const body = `${meta.scenario_name ? `<b>${meta.scenario_name}</b><br>` : ''}Cómputo ${fmtDur(wall ?? s.wall_time_s)} · ` +
+    (ft ? `área inundada ${fmt(ft.flooded_area_km2, 2)} km² · escorrentía ${fmtVol(ft.runoff_m3)} · Cv máx. ${fmt(s.max_cv, 2)}`
+      : `alcance ${fmt(s.runout_m, 0)} m · v máx. ${fmt(s.max_speed_m_s, 1)} m/s · depósito ${fmtVol(s.deposit_volume_m3)}`) +
     (ex ? `<br>Edificios alcanzados: <b>${fmt(ex.affected, 0)}</b> de ${fmt(ex.total, 0)}` : '');
-  toast('success', 'Simulación finalizada', body, [
+  const id = result.id;
+  toast('success', 'Simulación finalizada', body + '<br><span class="hint">Guardada en la biblioteca.</span>', [
     {label: 'Reproducir', icon: 'play', primary: true, fn: () => { if (!playing) $('play').click(); }},
     {label: 'Ver resumen', icon: 'graph-time-series', fn: () => $('summary').scrollIntoView({behavior: 'smooth', block: 'start'})},
+    {label: 'Informe', icon: 'file-report', fn: () => openReport(id)},
   ]);
   chime(true);
   osNotify('Simulación finalizada', `${meta.scenario_name || 'Suriyaco MassFlow 3D'} · cómputo ${fmtDur(wall ?? s.wall_time_s)}`);
@@ -460,16 +599,48 @@ function collectParams() {
   if (releasePoly) p.release_polygon = releasePoly.getLatLngs()[0].map(ll => [ll.lng, ll.lat]);
   if (marker) { p.source_lon = marker.getLatLng().lng; p.source_lat = marker.getLatLng().lat; }
   if (exposure.bodies) { delete p.release_polygon; delete p.source_lon; delete p.source_lat; }
-  return Object.assign(p, exposure.params());
+  Object.assign(p, exposure.params());
+  if (p.engine === 'flood') {
+    Object.assign(p, basinsPanel.params());
+    const uz = basinsPanel.urbanZone;
+    if (uz && !(p.exposure || []).length) p.exposure = [{name: 'Zona urbana', polygon: uz, erodible: false}];
+  }
+  delete p.ui;
+  p.project = $('projName').value.trim() || null;
+  p.analysis_name = $('anaName').value.trim() || null;
+  p.analysis_notes = $('anaNotes').value.trim() || null;
+  return p;
+}
+// escenario del frontend que se guarda con el análisis para reabrirlo tal cual (edificios, zona urbana, cuencas…)
+function uiState() {
+  const ex = exposure.example ? currentScenario() : {id: '_libre', title: '', params: collectParams(), free: true};
+  for (const k of ['project', 'analysis_name', 'analysis_notes', 'ui']) delete ex.params[k];
+  return {example: ex, view: {layer: $('layer').value, mapLayer: $('mapLayer').value, exag: exag(), matStyle: $('matStyle').value}};
 }
 $('run').onclick = async () => {
   const bad = invalidFields();
-  if (bad.length) { status('Valores fuera de rango: ' + bad.join(' · '), true); return; }
+  if (bad.length) {
+    status('Valores fuera de rango: ' + bad.join(' · '), true);
+    const el = [...document.querySelectorAll('[data-param]')].find(e => e.classList.contains('bad')), sec = el && el.closest('details[data-step]');
+    if (sec) wizard.show(sec.dataset.step);
+    return;
+  }
+  if (isFlood()) {
+    const why = basinsPanel.checkReady();
+    if (why) {
+      status(why, true);
+      toast('warning', 'Falta definir las cuencas', why, [{label: 'Ir al panel', icon: 'arrow-up', primary: true, fn: () => wizard.show('basins')}], 10000);
+      return;
+    }
+  }
   setMode(null); clearTimeout(pollTimer); setRunning(true); status('Enviando…');
+  wizard.minimize(true);
   try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch { /* sin audio */ }
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
   const params = collectParams();
-  runUI.start(params.scenario_name || (exposure.example && exposure.example.title) || '');
+  if (!params.analysis_name) params.analysis_name = params.scenario_name || (exposure.example && exposure.example.title) || null;
+  params.ui = uiState();
+  runUI.start(params.analysis_name || '');
   try {
     const r = await fetch(API + '/api/simulate', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(params)});
     if (!r.ok) throw new Error(await errText(r));
@@ -501,7 +672,9 @@ async function poll() {
     runUI.update(s);
     if (s.status === 'done') {
       runUI.show('Descargando resultados…', 100);
+      await library.refresh();
       await loadResult(id); setRunning(false); runUI.end();
+      library.setCurrent(id);
       runFinished(result.meta, s.elapsed_s);
       return;
     }
@@ -517,13 +690,13 @@ async function poll() {
   pollTimer = setTimeout(poll, 600);
 }
 
-async function loadResult(id) {
+async function loadResult(id, base = `${API}/api/jobs/${id}`) {
   status('Descargando resultados…');
   const [meta, buf] = await Promise.all([
-    fetch(`${API}/api/jobs/${id}/result`).then(r => r.json()),
-    fetch(`${API}/api/jobs/${id}/data.bin`).then(r => r.arrayBuffer()),
+    fetch(`${base}/result`).then(r => { if (!r.ok) throw new Error('resultado no disponible'); return r.json(); }),
+    fetch(`${base}/data.bin`).then(r => { if (!r.ok) throw new Error('datos no disponibles'); return r.arrayBuffer(); }),
   ]);
-  const d = meta.domain, n = d.nx * d.ny;
+  const d = meta.domain, n = d.nx * d.ny, gm = meta.grid_frames, gn = gm ? gm.nx * gm.ny : 0;
   const fields = {};
   for (const [k, a] of Object.entries(meta.arrays)) fields[k] = new Float32Array(buf, a.offset, a.length);
   let lastEro = -1;
@@ -532,20 +705,110 @@ async function loadResult(id) {
     if (f.erosion_offset != null) lastEro = i;
     return {t: f.t, count: c, x: new Uint16Array(buf, o, c), y: new Uint16Array(buf, o + 2 * c, c), z: new Uint16Array(buf, o + 4 * c, c),
       s: new Uint8Array(buf, o8, c), l: new Uint8Array(buf, o8 + c, c), f: new Uint8Array(buf, o8 + 2 * c, c),
-      ero: f.erosion_offset != null ? new Uint8Array(buf, f.erosion_offset, n) : null, eroIdx: lastEro};
+      ero: f.erosion_offset != null ? new Uint8Array(buf, f.erosion_offset, n) : null, eroIdx: lastEro,
+      gh: f.grid_offset != null ? new Uint8Array(buf, f.grid_offset, gn) : null, gc: f.cv_offset != null ? new Uint8Array(buf, f.cv_offset, gn) : null};
   });
-  result = {meta, fields, frames, tEnd: frames[frames.length - 1].t};
+  result = {id, meta, fields, frames, tEnd: frames[frames.length - 1].t, flood: meta.engine === 'flood'};
+  // capas que este resultado no tiene (p. ej. Cv en MPM, presión de poros en inundación)
+  for (const sel of [$('layer'), $('mapLayer')]) for (const o of sel.options)
+    o.disabled = !!LAYERS[o.value] && o.value !== 'current' && !fields[o.value];
+  for (const sel of [$('layer'), $('mapLayer')]) if (sel.selectedOptions[0] && sel.selectedOptions[0].disabled) sel.value = sel === $('layer') ? 'satellite' : 'current';
   buildScene();
   showSummary();
   $('summary').insertAdjacentHTML('afterbegin', exposure.applyResult(meta));
+  result.buildings = exposure.buildings;  // los edificios con que se calculó (para informes aunque después se cambie el escenario)
+  zones.show(meta);
+  $('summary').insertAdjacentHTML('afterbegin', zones.panelHTML());
+  $('summary').insertAdjacentHTML('afterbegin', analysisHeader());
+  zones.bindPanel($('summary'));
+  bindAnalysisHeader();
   if (releaseOutline) releaseOutline.remove();
+  if (result.flood) basinsPanel.showResult(meta.flood.geo);
   releaseOutline = L.polygon(meta.release.polygon.map(([lo, la]) => [la, lo]), {color: '#ffd28a', weight: 1.5, dashArray: '4 3', fill: false, interactive: false}).addTo(map);
   if (pendingLayer && [...$('layer').options].some(o => o.value === pendingLayer)) { $('layer').value = pendingLayer; pendingLayer = null; applyLayer(); }
   simT = 0; dynKey = null; playing = false; updatePlayBtn(); showTime(0); refreshDynamic(true);
   status(`${ic('check-circle')} Listo · ${meta.model} · ${meta.solver.device} — <b>Reproducir</b> para ver el evento`);
 }
 
+// ───────────────────────────── Biblioteca, informes y comparaciones
+const library = new LibraryPanel({api: API, status, toast: (...a) => toast(...a), onOpen: openAnalysis, onReport: openReport, onCompare: openCompare});
+library.onRenamed = e => { const h = $('anaHead'); if (h && result && result.id === e.id) { h.outerHTML = analysisHeader(); bindAnalysisHeader(); } };
+library.refresh();
+const docs = new DocViewer(document.querySelector('main > section'));
+
+function analysisHeader() {
+  const e = library.entry(result.id);
+  return `<div class="ana-head" id="anaHead"><div>${ic('folder')}<b>${esc(e ? e.name : result.meta.scenario_name || 'Análisis')}</b>` +
+    `<small>${e ? esc(e.project) : 'Análisis sin guardar'}</small></div>` +
+    `<div class="row"><button class="tool" id="anaReport">${ic('file-report')}Informe completo</button>` +
+    `<button class="tool" id="anaCompare" title="Marcá otros análisis en la biblioteca para compararlos con este">${ic('graph-bar-side-by-side')}Comparar…</button></div></div>`;
+}
+function bindAnalysisHeader() {
+  const id = result.id;
+  $('anaReport').onclick = () => openReport(id);
+  $('anaCompare').onclick = () => {
+    library.selected.add(id); library.render();
+    $('libSec').open = true; $('libSec').scrollIntoView({behavior: 'smooth', block: 'start'});
+    status('Marcá en la biblioteca los otros análisis a comparar y tocá <b>Comparar</b>.');
+  };
+}
+async function openAnalysis(id) {
+  if (!$('cancel').disabled) { status('Hay una simulación en curso: esperá a que termine o cancelala para abrir otro análisis.', true); return; }
+  try {
+    status(ic('refresh', 16, 'spin') + ' Abriendo el análisis guardado…');
+    const r = await fetch(`${API}/api/library/${id}`);
+    if (!r.ok) throw new Error(await errText(r));
+    const e = await r.json(), ex = e.ui && e.ui.example, v = (e.ui && e.ui.view) || {};
+    setMode(null);
+    if (ex) loadExample(ex, false, true);
+    else { $('exClear').click(); setBBox(e.bbox, false); $('engine').value = e.engine; applyEngine(); }
+    $('projName').value = e.project === 'Sin proyecto' ? '' : e.project;
+    $('anaName').value = e.name;
+    $('anaNotes').value = e.notes || '';
+    if (v.layer) pendingLayer = v.layer;
+    if (v.mapLayer) $('mapLayer').value = v.mapLayer;
+    if (v.exag) { $('exag').value = v.exag; applyExag(); }
+    if (v.matStyle) $('matStyle').value = v.matStyle;
+    await loadResult(id, `${API}/api/library/${id}`);
+    library.setCurrent(id);
+    const d = result.meta.domain;
+    map.fitBounds([[d.south, d.west], [d.north, d.east]], {padding: [10, 10]});
+    status(`${ic('folder-open')} Análisis abierto sin recalcular: <b>${esc(e.name)}</b> · ${esc(e.project)}. <b>Reproducir</b> para ver el evento; tocá las zonas del mapa para ver su detalle.`);
+  } catch (err) { status('No se pudo abrir el análisis: ' + err.message, true); }
+}
+// el resultado de la escena, para que los informes no vuelvan a descargar sus campos
+const loaded = () => result && {id: result.id, meta: result.meta, fields: result.fields, buildings: result.buildings};
+function snapshot3D() {
+  if (!result) return null;
+  const keep = simT;
+  showTime(result.tEnd);
+  controls.update();
+  renderer.render(scene, camera);
+  const url = canvas.toDataURL('image/jpeg', 0.9);
+  showTime(keep);
+  return url;
+}
+function openReport(id) {
+  const e = library.entry(id), name = e ? e.name : 'Análisis';
+  docs.show(`Informe · ${name}`, `Informe ${name}`, async msg => {
+    msg('Leyendo el análisis…');
+    const A = await loadAnalysis(API, id, loaded());
+    if (result && result.id === id) A.snapshot3D = snapshot3D();
+    return buildReport(A, msg);
+  });
+}
+function openCompare(ids) {
+  if (ids.length < 2) { if (ids.length) openReport(ids[0]); return; }
+  docs.show(`Comparación de ${ids.length} escenarios`, `Comparacion ${ids.length} escenarios`, async msg => {
+    msg('Leyendo los análisis…');
+    const As = await Promise.all(ids.map(id => loadAnalysis(API, id, loaded())));
+    As.sort((a, b) => a.entry.created - b.entry.created);
+    return buildComparison(As, msg);
+  });
+}
+
 function showSummary() {
+  if (result.flood) return showFloodSummary();
   const m = result.meta, s = m.summary, r = m.release, v = m.solver;
   const rows = [
     ['Volumen liberado', fmtVol(r.volume_m3)],
@@ -578,6 +841,28 @@ function showSummary() {
     m.warnings.map(w => `<div class="warn">⚠ ${w}</div>`).join('');
 }
 
+function showFloodSummary() {
+  const m = result.meta, s = m.summary, v = m.solver, f = m.flood, t = f.totals, st = f.storm;
+  const rows = [
+    [`${ic('rain')} Tormenta`, `${fmt(st.rain_mm, 0)} mm en ${fmt(st.duration_h, 2)} h · pico ${fmt(st.peak_intensity_mm_h, 0)} mm/h`],
+    ['Lluvia areal (reducción)', `${fmt(t.rain_mm, 1)} mm (× ${fmt(t.areal_reduction, 2)})`],
+    ['Lluvia / escorrentía', `${fmtVol(t.rain_m3)} / ${fmtVol(t.runoff_m3)} (C = ${fmt(t.runoff_coeff, 2)})`],
+    ['Salió de la zona / queda en ella', `${fmtVol(t.outflow_m3)} / ${fmtVol(t.stored_m3)}`],
+    ['Área inundada (h > 0,1 m)', fmt(t.flooded_area_km2, 2) + ' km²'],
+    ['Profundidad · velocidad máx.', `${fmt(s.max_depth_m, 1)} m · ${fmt(s.max_speed_m_s, 1)} m/s`],
+    ['Cv máx. (sedimento)', `${fmt(s.max_cv, 2)}${s.max_cv >= 0.4 ? ' · flujo de detritos' : s.max_cv >= 0.2 ? ' · hiperconcentrado' : ''}`],
+    ['Deslizamientos de ladera', t.landslide_cells ? `${fmt(t.landslide_cells, 0)} celdas · ${fmtVol(t.landslide_m3)}` : 'ninguno'],
+    ['Erosionado / depositado', `${fmtVol(t.eroded_m3)} / ${fmtVol(t.deposited_m3)}`],
+    ['Bloques movilizados', `${fmt(t.boulders_moved, 0)} de ${fmt(t.boulders, 0)} · recorrido máx. ${fmt(t.boulder_max_travel_m, 0)} m${t.boulders_in_urban ? ` · ${t.boulders_in_urban} en zona urbana` : ''}`],
+    ['Árboles arrancados', `${fmt(t.trees_uprooted, 0)} de ${fmt(t.trees, 0)} · recorrido máx. ${fmt(t.log_max_travel_m, 0)} m${t.logs_in_urban ? ` · ${t.logs_in_urban} en zona urbana` : ''}`],
+    ['DEM', m.dem_source || m.dataset],
+    ['Solver', `${v.device} · ${v.grid.join('×')} celdas · dx ${fmt(m.domain.dx, 1)} m · ${fmt(v.steps, 0)} pasos`],
+    ['Tiempo simulado / cómputo', `${fmtDur(v.t_end)} / ${fmtDur(s.wall_time_s)}`],
+  ];
+  $('summary').innerHTML = `<b>Resumen</b><table>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>` +
+    floodBasinsHTML(f) + m.warnings.map(w => `<div class="warn">⚠ ${w}</div>`).join('');
+}
+
 // ───────────────────────────── Escena 3D
 const canvas = $('gl');
 const renderer = new THREE.WebGLRenderer({canvas, antialias: true});
@@ -607,6 +892,7 @@ scene.add(world);
 let terrain = null, points = null, reliefColors = null, currentEro = -2, satTex = null;
 const realistic = new Realistic(world);
 const exposure = new Exposure(map, world);
+const zones = new ImpactZones(map, exposure);
 const SKY = skyTexture(), DARK = new THREE.Color(0x02070b);
 let spdA = new Float32Array(0), lamA = new Float32Array(0), flgA = new Uint8Array(0);
 for (const [k, st] of Object.entries(STYLES)) $('matStyle').add(new Option(st.name, k));
@@ -682,6 +968,8 @@ function buildScene() {
   const pg = new THREE.BufferGeometry();
   pg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cap * 3), 3));
   pg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cap * 3), 3));
+  // las partículas inactivas van en NaN: esfera fija para que three.js no la calcule (solo se usa para ordenar)
+  pg.boundingSphere = new THREE.Sphere(new THREE.Vector3(d.Lx / 2, d.Ly / 2, 0), Math.hypot(d.Lx, d.Ly));
   points = new THREE.Points(pg, new THREE.PointsMaterial({size: 1, vertexColors: true, map: dot, alphaTest: 0.5, sizeAttenuation: true}));
   points.frustumCulled = false;
   world.add(points);
@@ -772,6 +1060,8 @@ $('overview').onclick = overview;
 
 function updatePointSize() {
   if (!points || !result) return;
+  // inundación: los puntos son bloques y árboles (no representan volumen)
+  if (result.flood) { points.material.size = Math.max(3, result.meta.domain.dx * 0.3) * result.S * +$('psize').value; return; }
   const sp = result.meta.release.spacing_m || result.meta.domain.dx / 3;
   // si se muestra un subconjunto, cada punto representa más volumen
   const shown = result.frames[0].count, ratio = Math.max(1, result.meta.release.particles / Math.max(1, shown));
@@ -813,7 +1103,7 @@ function applyLayer() {
 }
 // las capas de resultados se descubren a medida que el flujo llega (arribo ≤ t); la capa "actual" es instantánea
 function reached(name, k) {
-  if (name === 'current') return true;
+  if (name === 'current' || LAYERS[name].always) return true;
   const a = result.fields.arrival[k];
   return a >= 0 && a <= simT + 1e-6;
 }
@@ -830,10 +1120,33 @@ function refreshDynamic(force = false) {
     applyLayer();
   }
 }
+// tirante (m) y Cv del instante t en la grilla completa, interpolados entre cuadros (motor de inundación)
+function gridAt(t) {
+  const F = result.frames, gm = result.meta.grid_frames, d = result.meta.domain, n = d.nx * d.ny;
+  let a = 0;
+  while (a < F.length - 1 && F[a + 1].t <= t) a++;
+  const b = Math.min(a + 1, F.length - 1), w = b === a ? 0 : Math.max(0, Math.min(1, (t - F[a].t) / (F[b].t - F[a].t)));
+  const key = a + ':' + w.toFixed(3);
+  if (result._gkey === key) return result._grid;
+  const H = result._grid ? result._grid.h : new Float32Array(n), C = result._grid ? result._grid.cv : new Float32Array(n);
+  const A = F[a].gh, B = F[b].gh, Ac = F[a].gc, Bc = F[b].gc, hs = gm.h_scale, cs = gm.cv_scale / 255, st = gm.stride;
+  if (!A || !B) return null;
+  for (let j = 0; j < d.ny; j++) {
+    const gj = Math.min(gm.ny - 1, Math.round(j / st)) * gm.nx;
+    for (let i = 0; i < d.nx; i++) {
+      const g = gj + Math.min(gm.nx - 1, Math.round(i / st)), qa = A[g] / 255, qb = B[g] / 255, k = j * d.nx + i;
+      H[k] = (qa * qa + (qb * qb - qa * qa) * w) * hs;
+      C[k] = (Ac[g] + (Bc[g] - Ac[g]) * w) * cs;
+    }
+  }
+  result._gkey = key;
+  return (result._grid = {h: H, cv: C});
+}
 // espesor actual del flujo a partir de las partículas visibles del instante (volumen por partícula visible / área)
 function computeCurrentDepth() {
   const d = result.meta.domain, {nx, ny, dx} = d, n = nx * ny;
   const F = result.fields.current || (result.fields.current = new Float32Array(n));
+  if (result.flood) { const g = gridAt(simT); if (g) F.set(g.h); return; }
   const T = result._tmpDepth || (result._tmpDepth = new Float32Array(n));
   F.fill(0);
   const pos = points.geometry.attributes.position.array, cnt = points.geometry.drawRange.count;
@@ -859,6 +1172,7 @@ $('layer').onchange = () => { if (result) refreshDynamic(true); else applyLayer(
 $('mapLayer').onchange = () => { if (result) refreshDynamic(true); };
 $('colorBy').onchange = () => { updateLegend(); showTime(simT); };
 
+LAYERS.current.mask = v => v > (result && result.flood ? 0.05 : 0.2);
 function updateMapOverlay() {
   const ml = $('mapLayer').value, name = ml === 'same' ? $('layer').value : ml;
   if (!result || !LAYERS[name] || !result.fields[name]) { if (overlay) { overlay.remove(); overlay = null; } return; }
@@ -887,9 +1201,12 @@ function updateMapOverlay() {
 function updateLegend() {
   const by = $('colorBy').value;
   let html = '';
-  if (view() === 'realistic') html += `<div style="margin-bottom:4px">Vista realista · ${STYLES[styleName()].name}<br><span class="sw" style="background:${STYLES[styleName()].surface};margin-left:0"></span>masa desprendida <span class="sw" style="background:#a08c6c"></span>material erosionado</div>`;
+  if (view() === 'realistic' && result && result.flood) html += `<div style="margin-bottom:4px">Vista realista · lámina de agua y barro<br>` +
+    `<span class="sw" style="background:#6f9aa0;margin-left:0"></span>agua <span class="sw" style="background:#a2804f"></span>hiperconcentrado <span class="sw" style="background:#6e5238"></span>flujo de detritos</div>`;
+  else if (view() === 'realistic') html += `<div style="margin-bottom:4px">Vista realista · ${STYLES[styleName()].name}<br><span class="sw" style="background:${STYLES[styleName()].surface};margin-left:0"></span>masa desprendida <span class="sw" style="background:#a08c6c"></span>material erosionado</div>`;
   else if (by === 'speed') html += legendRow('Velocidad de partículas', RAMPS.speed, 0, result ? result.speedMax : 60, 'm/s');
   else if (by === 'pore') html += legendRow('Presión de poros λ = p/σ', RAMPS.pore, 0, 1, '');
+  else if (result && result.flood) html += `<div>Trazadores <span class="sw" style="background:#9aa3ab"></span>bloque<span class="sw" style="background:#2f8f3a"></span>árbol en pie<span class="sw" style="background:#8b5a2b"></span>tronco arrastrado</div>`;
   else html += `<div>Origen <span class="sw" style="background:#c9a36b"></span>desprendimiento<span class="sw" style="background:#ff6a2b"></span>erosionado<span class="sw" style="background:#3fa9f5"></span>agua</div>`;
   const name = $('layer').value;
   if (result && LAYERS[name]) {
@@ -909,6 +1226,8 @@ function legendRow(title, stops, lo, hi, unit) {
 // ───────────────────────────── Reproducción
 let playing = false, simT = 0, lastTs = null;
 const ORIGIN = [new THREE.Color('#c9a36b'), new THREE.Color('#ff6a2b'), new THREE.Color('#3fa9f5')];
+// trazadores del motor de inundación (bandera): 3 tronco arrastrado · 4 bloque de roca · 5 árbol en pie
+const TRACER = {3: new THREE.Color('#8b5a2b'), 4: new THREE.Color('#9aa3ab'), 5: new THREE.Color('#2f8f3a')};
 
 function updateTerrainErosion(fi) {
   const fr = result.frames[fi], ei = fr.eroIdx;
@@ -950,7 +1269,7 @@ function showTime(t) {
     if (by === 'speed') { const c0 = lutIndex((A.s[i] + (B.s[i] - A.s[i]) * ww) * vs); col[i * 3] = lutS[c0]; col[i * 3 + 1] = lutS[c0 + 1]; col[i * 3 + 2] = lutS[c0 + 2]; continue; }
     if (by === 'pore') { const c0 = lutIndex((A.l[i] + (B.l[i] - A.l[i]) * ww) / 255); col[i * 3] = lutP[c0]; col[i * 3 + 1] = lutP[c0 + 1]; col[i * 3 + 2] = lutP[c0 + 2]; continue; }
     const of = (ww < 0.5 ? A : B).f[i];
-    c = ORIGIN[of === 1 ? 1 : of === 2 ? 2 : 0];
+    c = TRACER[of] || ORIGIN[of === 1 ? 1 : of === 2 ? 2 : 0];
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
   }
   points.geometry.setDrawRange(0, n);
@@ -960,7 +1279,9 @@ function showTime(t) {
   exposure.update3D(t);
   refreshDynamic();
   if (view() === 'realistic') {
-    realistic.update({pos, spd: spdA, lam: lamA, flg: flgA, n, exag: exag(), bed: terrain.geometry.attributes.position.array});
+    const bed = terrain.geometry.attributes.position.array, gr = result.flood && gridAt(t);
+    if (gr) realistic.updateGrid({h: gr.h, cv: gr.cv, pos, lam: lamA, flg: flgA, n, exag: exag(), bed});
+    else realistic.update({pos, spd: spdA, lam: lamA, flg: flgA, n, exag: exag(), bed});
     followFlow();
   }
   $('time').value = result.tEnd ? t / result.tEnd : 0;
@@ -971,6 +1292,7 @@ function showTime(t) {
 function view() { return $('view').value; }
 function styleName() {
   const v = $('matStyle').value;
+  if (v === 'auto' && result && result.flood) return 'debris';
   return v === 'auto' ? autoStyle(result && result.meta.material, !!(result && (result.meta.bodies || []).some(b => b.material === 'agua'))) : v;
 }
 function applyView() {
@@ -1027,4 +1349,6 @@ function tick(ts) {
   renderer.render(scene, camera);
 }
 applyView();
+applyEngine();
+wizard.show('start');
 requestAnimationFrame(tick);

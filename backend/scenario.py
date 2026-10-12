@@ -727,5 +727,13 @@ def summarize_fields(g, rel, fields, wall_s):
                 wall_time_s=round(wall_s, 1))
 
 
+def _json_default(o):
+    if isinstance(o, np.generic):
+        return o.item()
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    raise TypeError(f"{type(o).__name__} no serializable")
+
+
 def write_json(path: Path, obj):
-    path.write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
+    path.write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=_json_default))

@@ -1,5 +1,6 @@
 // Exposición: zonas urbanas y edificios (mapa + 3D), panel de impacto y ejemplos precargados.
 import * as THREE from 'three';
+import {DAMAGE_COLORS, DAMAGE_NAMES} from './palette.js';
 
 export const INTENSITY_COLORS = {0: '#d9d4c7', 1: '#ffe066', 2: '#ff9f1c', 3: '#d62828'};
 const NAMES = {1: 'baja', 2: 'media', 3: 'alta'};
@@ -28,12 +29,42 @@ export function normBuildings(ex) {
 // altura usada para el impacto: medida (campo o GBA) o estimada por pisos (3 m c/u); null = sin dato
 export const buildingHeight = b => b.height > 0 ? b.height : b.levels > 0 ? b.levels * 3 : null;
 
+// lo que le pasa al edificio i según el resultado (exposure.points del backend)
+export function buildingImpact(pts, i) {
+  if (!pts || i >= pts.intensity.length) return null;
+  const pick = k => pts[k] ? pts[k][i] : null;
+  return {intensity: pts.intensity[i], damage: pick('damage') ?? pts.intensity[i], depth: pick('depth_m'), speed: pick('speed_m_s'),
+    pressure: pick('pressure_kPa'), arrival: pts.arrival_s[i] >= 0 ? pts.arrival_s[i] : null};
+}
+export const damageChip = g => `<span class="dmg" style="background:${DAMAGE_COLORS[g]};color:${g >= 3 ? '#fff' : '#1b1b1b'}">${DAMAGE_NAMES[g]}</span>`;
+
+export function buildingHTML(b, r) {
+  const h = buildingHeight(b);
+  const rows = [
+    ['Altura', h ? `${fmt(h, 1)} m${b.height > 0 ? '' : ' (estimada por pisos)'}` : 'sin dato'],
+    ['Superficie', b.area ? `${fmt(b.area, 0)} m²` : '—'],
+    b.use ? ['Uso', b.use] : null, b.structure ? ['Estructura', b.structure] : null,
+    ['Fuente', b.src || '—'],
+  ].filter(Boolean);
+  if (r) rows.unshift(
+    ['Intensidad', ['sin afectación', 'baja', 'media', 'alta'][r.intensity] || '—'],
+    ['Profundidad máx.', r.depth != null ? fmt(r.depth, 2) + ' m' : '—'],
+    ['Velocidad máx.', r.speed != null ? fmt(r.speed, 1) + ' m/s' : '—'],
+    ['Presión dinámica', r.pressure != null ? fmt(r.pressure, 0) + ' kPa' : '—'],
+    ['Llegada del flujo', r.arrival != null ? fmtT(r.arrival) : 'no llega']);
+  return `<div class="pop"><div class="pop-h"><b>Edificio ${b.id}</b>${r ? damageChip(r.damage) : ''}</div>` +
+    `<table>${rows.map(([a, v]) => `<tr><td>${a}</td><td>${v}</td></tr>`).join('')}</table>` +
+    (b.notes ? `<p class="hint">${b.notes}</p>` : '') + `<div class="hint">${fmt(b.lat, 5)}, ${fmt(b.lon, 5)}</div></div>`;
+}
+
 export class Exposure {
   constructor(map, world) {
     this.map = map;
     this.world = world;
     this.layer = L.layerGroup().addTo(map);
-    this.renderer = L.canvas({padding: 0.3});
+    // los edificios van sobre las zonas de afectación para poder tocarlos
+    if (!map.getPane('buildingsPane')) map.createPane('buildingsPane').style.zIndex = 450;
+    this.renderer = L.canvas({padding: 0.3, pane: 'buildingsPane'});
     this.example = null;
     this.markers = [];
     this.mesh = null;
@@ -41,6 +72,14 @@ export class Exposure {
   }
 
   get active() { return !!this.example; }
+
+  // edificios sin ejemplo cargado (p. ej. GlobalBuildingAtlas en una zona libre): se agregan al escenario actual
+  setBuildings(list) {
+    const ex = this.example || {id: '_libre', title: '', params: {}, free: true};
+    ex.buildings = list;
+    delete ex.params.exposure_points;
+    this.set(ex);
+  }
 
   set(example) {
     this.clear();
@@ -78,7 +117,16 @@ export class Exposure {
     }
     const b = example.buildings = normBuildings(example);
     this.buildings = b;
-    this.markers = b.map(({lon: lo, lat: la}) => L.circleMarker([la, lo], {renderer: this.renderer, radius: 2.2, weight: 0, fillOpacity: .9, fillColor: INTENSITY_COLORS[0], interactive: false}).addTo(this.layer));
+    this.markers = b.map(({lon: lo, lat: la}, i) => L.circleMarker([la, lo], {renderer: this.renderer, radius: 2.2, weight: 0, fillOpacity: .9, fillColor: INTENSITY_COLORS[0], bubblingMouseEvents: false})
+      .on('click', () => this.openBuilding(i)).addTo(this.layer));
+  }
+
+  openBuilding(i, zoom = false) {
+    const b = this.buildings && this.buildings[i];
+    if (!b) return;
+    if (zoom) this.map.setView([b.lat, b.lon], Math.max(this.map.getZoom(), 17));
+    L.popup({maxWidth: 320, className: 'bld-popup'}).setLatLng([b.lat, b.lon])
+      .setContent(buildingHTML(b, buildingImpact(this.result && this.result.points, i))).openOn(this.map);
   }
 
   clear() {
@@ -124,25 +172,30 @@ export class Exposure {
     if (!G.length) return '';
     const W = 290, H = 110, pad = 26;
     const tMax = Math.max(...G.map(g => g.t[g.t.length - 1] || 1));
-    const qMax = Math.max(1, ...G.flatMap(g => g.Q));
+    const qMax = Math.max(1, ...G.flatMap(g => g.Q.concat(g.Q_scs || [])));
+    const hrs = tMax > 7200, ft = t => hrs ? `${fmt(t / 3600, 2)} h` : `${fmt(t / 60, 1)} min`;
     const cols = ['#3fa9f5', '#ffd166', '#ef476f'];
     const px = t => pad + (W - pad - 6) * t / tMax, py = q => H - 16 - (H - 26) * q / qMax;
     let svg = `<svg viewBox="0 0 ${W} ${H}" class="hydro"><line x1="${pad}" y1="${H - 16}" x2="${W - 4}" y2="${H - 16}" stroke="#3a5566"/>` +
       `<line x1="${pad}" y1="6" x2="${pad}" y2="${H - 16}" stroke="#3a5566"/>` +
-      `<text x="${pad - 3}" y="12" text-anchor="end">${fmt(qMax / 1000, 1)}k</text><text x="${pad - 3}" y="${H - 16}" text-anchor="end">0</text>` +
-      `<text x="${W - 4}" y="${H - 3}" text-anchor="end">${fmt(tMax / 60, 0)} min</text><text x="${pad}" y="${H - 3}">0</text>`;
+      `<text x="${pad - 3}" y="12" text-anchor="end">${qMax >= 1000 ? fmt(qMax / 1000, 1) + 'k' : fmt(qMax, 0)}</text><text x="${pad - 3}" y="${H - 16}" text-anchor="end">0</text>` +
+      `<text x="${W - 4}" y="${H - 3}" text-anchor="end">${hrs ? fmt(tMax / 3600, 1) + ' h' : fmt(tMax / 60, 0) + ' min'}</text><text x="${pad}" y="${H - 3}">0</text>`;
     G.forEach((g, k) => {
+      if (g.Q_scs) svg += `<polyline fill="none" stroke="${cols[k % 3]}" stroke-width="1" stroke-dasharray="3 2" opacity=".8" points="${g.t.map((t, i) => `${px(t).toFixed(1)},${py(g.Q_scs[i]).toFixed(1)}`).join(' ')}"/>`;
       svg += `<polyline fill="none" stroke="${cols[k % 3]}" stroke-width="1.6" points="${g.t.map((t, i) => `${px(t).toFixed(1)},${py(g.Q[i]).toFixed(1)}`).join(' ')}"/>`;
     });
     svg += '</svg>';
     let rows = '';
     G.forEach((g, k) => {
       const iq = g.Q.indexOf(Math.max(...g.Q)), arr = g.t.find((t, i) => g.h[i] > 0.5);
-      rows += `<tr><td><span class="sw" style="background:${cols[k % 3]};margin-left:0"></span>${g.name}</td><td>${fmt(g.Q[iq], 0)} m³/s · ${fmt(g.t[iq] / 60, 1)} min</td></tr>` +
-        `<tr><td class="sub">llegada (h > 0,5 m) · h máx. · v máx.</td><td>${arr != null ? fmt(arr / 60, 1) + ' min' : '—'} · ${fmt(Math.max(...g.h), 1)} m · ${fmt(Math.max(...g.v), 1)} m/s</td></tr>`;
+      rows += `<tr><td><span class="sw" style="background:${cols[k % 3]};margin-left:0"></span>${g.name}</td><td>${fmt(g.Q[iq], 0)} m³/s · ${ft(g.t[iq])}</td></tr>` +
+        (g.Q_scs ? `<tr><td class="sub">pico SCS (punteado)</td><td>${fmt(Math.max(...g.Q_scs), 0)} m³/s</td></tr>` : '') +
+        `<tr><td class="sub">llegada (h > 0,5 m) · h máx. · v máx.${g.cv ? ' · Cv máx.' : ''}</td><td>${arr != null ? ft(arr) : '—'} · ${fmt(Math.max(...g.h), 1)} m · ${fmt(Math.max(...g.v), 1)} m/s${g.cv ? ' · ' + fmt(Math.max(...g.cv), 2) : ''}</td></tr>`;
     });
     return `<div class="zone"><div class="zname">Hidrogramas (estaciones virtuales)</div>${svg}<table><tr><td></td><td><b>Caudal pico · tiempo</b></td></tr>${rows}</table>` +
-      `<div class="hint">Q = Σ h·v·ancho a través de la sección. Tiempos desde el inicio del colapso.</div></div>`;
+      `<div class="hint">Q = Σ h·v·ancho a través de la sección. ${meta.engine === 'flood'
+        ? 'Tiempos desde el inicio de la lluvia. Punteado: hidrograma SCS (método agregado) en la misma salida, para comparar con el 2D.'
+        : 'Tiempos desde el inicio del colapso.'}</div></div>`;
   }
 
   panelHTML(meta) {
@@ -173,6 +226,8 @@ export class Exposure {
         `<tr><td><span class="sw" style="background:${INTENSITY_COLORS[3]};margin-left:0"></span>Intensidad alta</td><td>${fmt(c.alta, 0)}</td></tr>` +
         `<tr><td><span class="sw" style="background:${INTENSITY_COLORS[2]};margin-left:0"></span>Intensidad media</td><td>${fmt(c.media, 0)}</td></tr>` +
         `<tr><td><span class="sw" style="background:${INTENSITY_COLORS[1]};margin-left:0"></span>Intensidad baja</td><td>${fmt(c.baja, 0)}</td></tr>` +
+        (p.damage_counts ? `<tr><td colspan="2" class="sub" style="padding-left:0;padding-top:6px">Grado de daño estimado</td></tr>` +
+          [4, 3, 2, 1].map(g => `<tr><td><span class="sw" style="background:${DAMAGE_COLORS[g]};margin-left:0"></span>${DAMAGE_NAMES[g]}</td><td>${fmt(p.damage_counts[DAMAGE_NAMES[g]], 0)}</td></tr>`).join('') : '') +
         `<tr><td>Primer edificio alcanzado</td><td>${fmtT(p.first_arrival_s)}</td></tr>` +
         `<tr><td>50% de los alcanzados, antes de</td><td>${fmtT(med)}</td></tr>` +
         (p.with_height ? `<tr><td>Flujo ≥ mitad de la altura</td><td>${fmt(p.half_height, 0)}</td></tr>` +
@@ -180,7 +235,9 @@ export class Exposure {
           `<tr><td class="sub">con altura conocida (campo, GBA o pisos)</td><td>${fmt(p.with_height, 0)} de ${fmt(p.total, 0)}</td></tr>` : '') +
         `</table></div>`;
     }
-    h += `<div class="hint">Intensidad para flujos de detritos (Hürlimann et al., 2008): alta h ≥ 1 m y v ≥ 1 m/s; media, una de las dos; baja, el resto. Presión dinámica ≈ ρ·v². Los tiempos se cuentan desde el inicio del desprendimiento.</div></div>`;
+    h += meta.engine === 'flood'
+      ? `<div class="hint">Intensidad en cada edificio, según el flujo que lo alcanza. Crecida de agua (Cv &lt; 0,2): alta si h &gt; 2 m o h·v &gt; 2 m²/s; media si h &gt; 0,5 m o h·v &gt; 0,5 m²/s; baja con h &gt; 0,1 m. Barro y detritos (Cv ≥ 0,2), según Hürlimann et al. (2008): alta si h ≥ 1 m y v ≥ 1 m/s; media, una de las dos; baja, el resto. Los tiempos se cuentan desde el inicio de la lluvia.</div></div>`
+      : `<div class="hint">Intensidad para flujos de detritos (Hürlimann et al., 2008): alta h ≥ 1 m y v ≥ 1 m/s; media, una de las dos; baja, el resto. Presión dinámica ≈ ρ·v². Los tiempos se cuentan desde el inicio del desprendimiento.</div></div>`;
     return h;
   }
 

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: simulador-alud
+    runtime: python
+    plan: starter
+    buildCommand: pip install --upgrade pip && pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: OPENTOPOGRAPHY_API_KEY
+        sync: false

@@ -4,6 +4,10 @@
 
 export const HELP = {
   // ── Secciones
+  'sec-project': {t: 'Proyecto y análisis', d: 'Cada simulación que termina se guarda en la biblioteca con un nombre y dentro de un proyecto (por ejemplo, una ciudad o un estudio). Así se puede volver a abrir sin recalcular, generar su informe y compararla con otros escenarios del mismo proyecto.',
+    e: 'Si el nombre queda vacío se usa el del ejemplo o la fecha. El proyecto se elige de la lista o se escribe uno nuevo. Nombre, proyecto y notas se pueden cambiar después desde la biblioteca.'},
+  'sec-library': {t: 'Biblioteca de análisis', d: 'Los análisis guardados, agrupados por proyecto. Tocar uno lo abre con sus resultados, zonas de afectación y edificios, y carga sus parámetros en el formulario para repetirlo o variarlo. El ícono de informe genera un documento completo con mapas, gráficos y tablas, listo para imprimir o guardar como PDF.',
+    e: 'Marcá dos o más análisis y usá "Comparar": indicadores lado a lado, gráficos, mapas con la misma extensión, envolvente y coincidencia entre escenarios, edificios afectados en cada uno y los parámetros que cambian.'},
   'sec-examples': {t: 'Ejemplos', d: 'Escenarios completos y parametrizados: zona de cálculo, DEM, área de desprendimiento, material, agua, erosión, solver y elementos expuestos (zona urbana y edificios). "Cargar" completa todos los campos para que puedas revisarlos o modificarlos; "Cargar y simular" además lanza la simulación.',
     e: 'Al cargar un ejemplo se agregan su zona expuesta, sus edificios y, si es un escenario en cascada, sus masas iniciales (hielo, lago), brecha, cauces y estaciones de aforo; mientras está cargado no se puede dibujar otro desprendimiento. "Quitar ejemplo" vuelve al modo libre.'},
   'sec-zona': {t: 'Zona de cálculo', d: 'Rectángulo del terreno que se descarga y simula. Todo el recorrido del flujo tiene que quedar dentro: el material que llega al borde sale del dominio y se contabiliza como "Salió del dominio".',
@@ -20,7 +24,10 @@ export const HELP = {
     v: 'Seco: λ ≈ 0 · saturado en reposo: λ ≈ 0,4–0,5 · licuado: λ → 0,8–0,95.'},
   'sec-erosion': {t: 'Erosión y deposición', d: 'El flujo puede arrancar material del lecho por donde pasa (entrainment) y crecer en volumen, como los flujos de detritos que "engordan" en el cauce. El lecho desciende donde hay erosión. La deposición es el material que termina en reposo.',
     v: 'Espesor erosionable 0 = desactivado. Cauces con sedimento suelto: 1–5 m.'},
-  'sec-solver': {t: 'Solver', d: 'Motor numérico y resolución. MPM 3D resuelve el material como medio continuo (con interacción entre partículas, presión de poros y erosión). "Partículas" es el motor rápido v0.1: trayectorias independientes, útil solo para previsualizar.',
+  'sec-basins': {t: 'Cuencas y tormenta', d: 'Motor "Inundación por lluvia": no hay una masa inicial, la tormenta llueve sobre toda la zona. Primero se delinean las cuencas y subcuencas sobre el DEM (relleno de depresiones, direcciones de flujo D8, área acumulada, orden de Strahler) y se calcula la hidrología de cada una (SCS-CN, hidrograma unitario SCS, Muskingum). Después la simulación 2D de aguas someras (inercial local) mueve el agua y el sedimento: en los cauces empinados la crecida erosiona el lecho hasta volverse un flujo de detritos (equilibrio de Takahashi) y en los abanicos deposita; los deslizamientos de ladera (SHALSTAB) suman material, y los bloques y árboles se arrastran como trazadores.',
+    v: 'Tormentas convectivas en las sierras áridas del NOA y Cuyo: 30–80 mm en 1–3 h. CN 80–90 en roca y suelo desnudo.',
+    e: '"Delinear cuencas" muestra en el mapa las cuencas, los cauces, dónde la escorrentía puede disparar un alud (Gregoretti) y los caudales pico SCS, sin simular. Ampliá la zona si una cuenca toca el borde: el agua que entra desde afuera no se simula.'},
+  'sec-solver': {t: 'Solver', d: 'Motor numérico y resolución. MPM 3D resuelve el material como medio continuo (con interacción entre partículas, presión de poros y erosión). "Partículas" es el motor rápido v0.1: trayectorias independientes, útil solo para previsualizar. "Inundación por lluvia" es un modelo 2D de aguas someras con reología de barro (O\'Brien-Julien), para crecidas y aludes en cuencas.',
     e: 'La primera corrida de MPM compila los kernels (~15 s).'},
 
   // ── Zona

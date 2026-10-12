@@ -16,6 +16,8 @@ export const STYLES = {
 };
 const SEDIMENT = ['#a08c6c', '#8f7d60', '#b39f80', '#978567'];
 const WATER = new THREE.Color('#6f9aa0');  // agua glaciar turbia (harina de roca)
+const HYPER = new THREE.Color('#a2804f');  // flujo hiperconcentrado (Cv ≈ 0,2)
+const MUD = new THREE.Color('#6e5238');    // flujo de detritos (Cv ≥ 0,4)
 
 export function autoStyle(mat, hasWater) {
   if (hasWater) return 'glof';
@@ -146,7 +148,9 @@ export class Realistic {
     this.dispose();
     const d = result.meta.domain, rel = result.meta.release;
     this.S = result.S;
-    const s = d.nx * d.ny > 90000 ? 2 : 1;
+    // inundación: la lámina viene de la grilla y los cauces son angostos, se usa resolución completa si es posible
+    this.flood = !!result.flood;
+    const s = d.nx * d.ny > (this.flood ? 500000 : 90000) ? 2 : 1;
     const gnx = Math.floor((d.nx - 1) / s) + 1, gny = Math.floor((d.ny - 1) / s) + 1, gn = gnx * gny;
     Object.assign(this, {s, gnx, gny, gn, cs: d.dx * s, nxT: d.nx});
     this.bedIdx = new Int32Array(gn);
@@ -269,6 +273,68 @@ export class Realistic {
 
     this.updateClasts(pos, spd, flg, n, exag);
     if (st.dust) this.updateDust(pos, spd, flg, n);
+  }
+
+  // motor de inundación: lámina de agua/barro desde el tirante h y la concentración Cv de la grilla completa;
+  // bloques y troncos con su tamaño real (bandera 4 bloque, 3 tronco; los árboles en pie no se dibujan)
+  updateGrid({h, cv, pos, lam, flg, n, exag, bed}) {
+    if (!this.surface) return;
+    const {gn, gnx, cs, hz} = this, P = this.surface.geometry.attributes.position.array, C = this.surface.geometry.attributes.color.array;
+    const c = this._c, mud = MUD, hyper = HYPER;
+    let sw = 0, sx = 0, sy = 0, sz = 0, x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let k = 0; k < gn; k++) {
+      const idx = this.bedIdx[k], tb = bed[idx * 3 + 2], hh = h[idx], on = hh > 0.05;
+      hz[k] = on ? tb + hh : -1e9;
+      // la lámina se levanta un poco sobre el lecho para no quedar tapada por el terreno de la malla fina
+      P[k * 3 + 2] = on ? tb + hh + 0.25 : tb - 4;
+      if (!on) continue;
+      const x = (k % gnx) * cs, y = Math.floor(k / gnx) * cs;
+      sw += hh; sx += hh * x; sy += hh * y; sz += hh * (tb + hh);
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      const f = cv[idx];
+      if (f < 0.2) c.copy(WATER).lerp(hyper, f / 0.2); else c.copy(hyper).lerp(mud, Math.min(1, (f - 0.2) / 0.2));
+      const dk = 1 - 0.3 * Math.min(1, hh / 3);  // más oscuro cuanto más profundo
+      C[k * 3] = c.r * dk; C[k * 3 + 1] = c.g * dk; C[k * 3 + 2] = c.b * dk;
+    }
+    this.stats = sw > 0 ? {x: sx / sw, y: sy / sw, z: sz / sw, ext: Math.max(x1 - x0, y1 - y0, cs * 4)} : null;
+    const g = this.surface.geometry, m = this.surface.material;
+    if (m.roughness !== 0.3) { m.roughness = 0.3; m.bumpScale = 0.6; m.needsUpdate = true; }
+    this.heightfieldNormals(P, g.attributes.normal.array);
+    g.attributes.position.needsUpdate = true; g.attributes.color.needsUpdate = true; g.attributes.normal.needsUpdate = true;
+    this.dust.visible = false;
+    this.updateTracers(pos, lam, flg, n, exag);
+  }
+
+  updateTracers(pos, lam, flg, n, exag) {
+    const inst = this.clasts, m = this._m, q = this._q, q0 = this._q0, ax = this._ax, sc = this._s, rnd = this.rnd, st = this.style;
+    let used = 0;
+    for (let i = 0; i < n && used < this.maxClasts; i++) {
+      const f = flg[i];
+      if ((f !== 3 && f !== 4) || isNaN(pos[i * 3])) continue;
+      const slot = used++, x = pos[i * 3], y = pos[i * 3 + 1];
+      if (isNaN(this.p0[i * 2])) { this.p0[i * 2] = x; this.p0[i * 2 + 1] = y; }
+      const dxm = x - this.p0[i * 2], dym = y - this.p0[i * 2 + 1], L = Math.hypot(dxm, dym);
+      if (f === 4) {
+        const r = lam[i] * 2;  // λ = d/4 → radio d/2
+        q0.setFromAxisAngle(ax.set(rnd[i * 6 + 1] - .5, rnd[i * 6 + 2] - .5, rnd[i * 6 + 3] - .5).normalize(), rnd[i * 6 + 4] * 6.283);
+        if (L > 1e-3) q.setFromAxisAngle(ax.set(-dym / L, dxm / L, 0), L / Math.max(r, 0.1) * 0.6).multiply(q0); else q.copy(q0);
+        sc.set(r * (0.8 + 0.5 * rnd[i * 6 + 5]), r * (0.8 + 0.4 * rnd[i * 6 + 2]), r * (0.6 + 0.4 * rnd[i * 6 + 3]));
+      } else {
+        const len = lam[i] * 12;  // λ = largo/12
+        q.setFromAxisAngle(ax.set(0, 0, 1), rnd[i * 6 + 4] * 6.283);
+        sc.set(len / 2, 0.25, 0.25);
+      }
+      m.compose(ax.set(0, 0, 0), q, sc);
+      m.elements[2] /= exag; m.elements[6] /= exag; m.elements[10] /= exag;
+      m.setPosition(x, y, pos[i * 3 + 2]);
+      inst.setMatrixAt(slot, m);
+      // el slot de cada trazador cambia entre cuadros (árboles que pasan a troncos): el color se asigna siempre
+      inst.setColorAt(slot, this._c.set(f === 3 ? '#6b4a2b' : st.clasts[Math.floor(rnd[i * 6 + 4] * st.clasts.length) % st.clasts.length]));
+    }
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    this.lastFlag.fill(254);
+    inst.count = used;
+    inst.instanceMatrix.needsUpdate = true;
   }
 
   // normales por diferencias centrales (malla regular): mucho más barato que computeVertexNormals

@@ -24,6 +24,21 @@ TILES_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}
 DEM_CACHE = Path(__file__).resolve().parents[1] / "cache" / "dem"
 
 
+def _load_env(path=Path(__file__).resolve().parent / ".env"):
+    """Variables de backend/.env (KEY=valor). No pisa las que ya vienen del entorno (p. ej. las de Render)."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+_load_env()
+
+
 class DemError(RuntimeError):
     pass
 
@@ -46,7 +61,7 @@ def synthetic_dem(west, south, east, north, width=360, height=360):
 
 
 def api_key():
-    return os.getenv("OPENTOPOGRAPHY_API_KEY", "8aec0599cce1f6b84f91afc14f138bae").strip()
+    return os.getenv("OPENTOPOGRAPHY_API_KEY", "").strip()
 
 
 def _redact(msg: str) -> str:

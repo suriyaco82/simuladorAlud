@@ -21,6 +21,11 @@ def run_job(job_dir: str, p: dict, q):
         q.put(dict(type="progress", **kw))
 
     try:
+        if p["engine"] == "flood":
+            from .flood import run_flood_job
+            scenario.write_json(job_dir / "result.json", run_flood_job(job_dir, p, progress))
+            q.put(dict(type="done"))
+            return
         progress(stage="Cargando DEM…")
         arr, transform, dem_info = dem.load_dem(p["dataset"], p["bbox"], max_dim=900 if p["engine"] == "mpm" else 480,
                                                 fallback=p.get("dem_fallback", True),
@@ -140,6 +145,10 @@ def run_job(job_dir: str, p: dict, q):
             scenario_name=p.get("scenario_name"),
             **meta,
         )
+        from . import impact
+        result["exposure"]["points"] = impact.enrich_points(result["domain"], fields, p.get("exposure_points"),
+                                                            p.get("exposure_heights"), exposure.get("points"))
+        result["impact"] = impact.impact_zones(result["domain"], fields, exposure.get("points"), p.get("exposure_points"))
         scenario.write_json(job_dir / "result.json", result)
         q.put(dict(type="done"))
     except Exception as e:

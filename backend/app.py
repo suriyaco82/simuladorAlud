@@ -18,17 +18,19 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import buildings, dem
+from .library import Library
 from .worker import run_job
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "cache"
 EXAMPLES = ROOT / "frontend" / "examples"
-JOBS = CACHE / "jobs"
-JOBS.mkdir(parents=True, exist_ok=True)
+JOBS = CACHE / "jobs"  # versiones anteriores: se importan a la biblioteca al iniciar
+library = Library(CACHE / "library")
 
 app = FastAPI(title="Suriyaco MassFlow 3D", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -132,11 +134,91 @@ class ErodibleZone(BaseModel):
     depth_m: float = Field(..., ge=0, le=100)
 
 
+class Storm(BaseModel):
+    """Tormenta de diseño para el motor de inundación por lluvia."""
+    rain_mm: float = Field(60.0, ge=0, le=1500, description="Lluvia total de la tormenta (mm, puntual)")
+    duration_h: float = Field(3.0, gt=0.05, le=72, description="Duración de la tormenta (h)")
+    pattern: Literal["uniforme", "adelantado", "centrado", "atrasado", "bloques"] = Field(
+        "adelantado", description="Forma del hietograma")
+    cn: float = Field(80.0, ge=30, le=99, description="Número de curva SCS (condición de humedad II)")
+    amc: Literal["I", "II", "III"] = Field("II", description="Humedad antecedente: I seca · II normal · III húmeda")
+    ia_ratio: float = Field(0.2, ge=0.01, le=0.3, description="Abstracción inicial Ia/S")
+    areal_reduction: bool = Field(True, description="Reducir la lluvia puntual según el área de la cuenca (Témez)")
+
+
+class Soil(BaseModel):
+    """Suelo de ladera para los deslizamientos superficiales (SHALSTAB). Vacío = valores por defecto de hydro.py."""
+    soil_depth_m: float | None = Field(None, gt=0.1, le=20)
+    transmissivity_m2_day: float | None = Field(None, gt=0.1, le=1000)
+    cohesion_kpa: float | None = Field(None, ge=0, le=200)
+    friction_angle_deg: float | None = Field(None, ge=10, le=50)
+    infiltration: float | None = Field(None, ge=0.05, le=1)
+    porosity: float | None = Field(None, ge=0.05, le=0.7)
+    min_slope_deg: float | None = Field(None, ge=0, le=60)
+    max_slope_deg: float | None = Field(None, ge=20, le=90)
+    channel_area_m2: float | None = Field(None, ge=500, le=1e7)
+
+
+class Debris(BaseModel):
+    """Disparo y propagación de flujos de detritos en los cauces."""
+    channel_erodible_m: float | None = Field(None, ge=0, le=20, description="Espesor erosionable del lecho de los cauces (m)")
+    channel_area_km2: float | None = Field(None, gt=0, le=100, description="Área de aporte a partir de la cual hay cauce (km²)")
+    grain_size_m: float | None = Field(None, gt=0.001, le=2, description="Diámetro medio del lecho (m), umbral de Gregoretti")
+    debris_friction_deg: float | None = Field(None, ge=20, le=45, description="Fricción del material del lecho (°), Takahashi")
+    bed_porosity: float | None = Field(None, ge=0.1, le=0.6)
+    deposition_slope_deg: float | None = Field(None, ge=1, le=25, description="Pendiente bajo la cual el flujo deposita (°)")
+    trigger_min_slope_deg: float | None = Field(None, ge=1, le=45, description="Pendiente mínima de disparo en el cauce (°)")
+    wave_celerity_m_s: float | None = Field(None, gt=0.1, le=20, description="Celeridad para el tránsito entre subcuencas (m/s)")
+
+
+class FloodOptions(BaseModel):
+    """Parámetros numéricos y de rugosidad del modelo 2D de inundación."""
+    max_cells: int | None = Field(None, ge=10_000, le=3_000_000, description="Presupuesto de celdas (aumenta dx si se supera)")
+    manning_channel: float | None = Field(None, gt=0.005, le=0.3)
+    manning_hillslope: float | None = Field(None, gt=0.005, le=0.5)
+    manning_urban: float | None = Field(None, gt=0.005, le=0.3)
+    cn_urban: float | None = Field(None, ge=30, le=99)
+    entrainment_coeff: float | None = Field(None, ge=0, le=0.1)
+    critical_velocity: float | None = Field(None, ge=0, le=10)
+    hillslope_erodible_m: float | None = Field(None, ge=0, le=2)
+    landslides: bool | None = None
+    subgrid_channels: bool | None = None
+    boulders: int | None = Field(None, ge=0, le=20000)
+    boulder_dmin_m: float | None = Field(None, gt=0.05, le=5)
+    boulder_dmax_m: float | None = Field(None, gt=0.1, le=10)
+    trees_per_km: float | None = Field(None, ge=0, le=1000)
+    max_trees: int | None = Field(None, ge=0, le=20000)
+    auto_gauges: int | None = Field(None, ge=0, le=60, description="Estaciones automáticas en salidas de cuencas y subcuencas")
+    rain_outside: bool | None = Field(None, description="Llover también fuera de las cuencas elegidas")
+    theta: float | None = Field(None, ge=0.5, le=1)
+    froude_max: float | None = Field(None, gt=0.3, le=5)
+
+
+class Outlet(BaseModel):
+    lon: float
+    lat: float
+    name: str | None = None
+
+
+class BasinOptions(BaseModel):
+    mode: Literal["edge", "outlets", "target"] = Field(
+        "edge", description="Salidas: borde de la zona · puntos marcados · entradas de cauces a la zona urbana")
+    stream_area_km2: float = Field(0.5, gt=0, le=1000, description="Área mínima para dibujar un cauce (km²)")
+    subbasin_area_km2: float = Field(5.0, gt=0, le=10000, description="Subcuenca en cada confluencia de cauces mayores que esto (km²)")
+    min_basin_area_km2: float = Field(2.0, gt=0, le=10000, description="Área mínima de una cuenca principal (km²)")
+    snap_radius_m: float = Field(300.0, ge=0, le=5000, description="Radio para llevar cada salida al cauce más cercano (m)")
+    outlets: list[Outlet] | None = None
+    target_polygon: list[tuple[float, float]] | None = None
+    target_name: str | None = None
+    selected: list[tuple[float, float]] | None = Field(
+        None, description="Salidas [lon, lat] de las cuencas principales a simular (de /api/basins); vacío = todas")
+
+
 class SimRequest(BaseModel):
     bbox: BBox = Field(default_factory=lambda: BBox(west=-66.96, south=-29.41, east=-66.89, north=-29.34))
     dataset: str = "SYNTHETIC"
     dem_fallback: bool = Field(True, description="Si OpenTopography falla, usar AWS Terrain Tiles")
-    engine: Literal["mpm", "particles"] = "mpm"
+    engine: Literal["mpm", "particles", "flood"] = Field("mpm", description="mpm · particles · flood (inundación por lluvia en cuencas)")
     device: Literal["auto", "gpu", "cpu"] = "auto"
     # desprendimiento
     release_polygon: list[tuple[float, float]] | None = Field(None, description="[[lon, lat], ...]")
@@ -168,7 +250,7 @@ class SimRequest(BaseModel):
     # numérica
     dx: float = Field(25.0, ge=1, le=500)
     ppc: int = Field(3, ge=1, le=5)
-    duration_s: float = Field(120.0, gt=1, le=10800)
+    duration_s: float = Field(120.0, gt=1, le=172800, description="Tiempo simulado (s); MPM y partículas hasta 10800")
     max_frames: int = Field(180, ge=10, le=400)
     display_particles: int = Field(30000, ge=500, le=200000)
     max_particles: int = Field(600000, ge=1000, le=5000000)
@@ -184,11 +266,22 @@ class SimRequest(BaseModel):
     water_bulk_modulus: float = Field(4e6, ge=1e5, le=1e9, description="Módulo volumétrico del agua (Pa), reducido")
     water_viscosity_pa_s: float = Field(5.0, ge=0, le=1000)
     turbulence_xi: float = Field(0.0, ge=0, le=10000, description="Voellmy ξ (m/s²); 0 = sin resistencia turbulenta")
+    # biblioteca: nombre y proyecto con que se guarda el análisis
+    project: str | None = Field(None, max_length=120)
+    analysis_name: str | None = Field(None, max_length=160)
+    analysis_notes: str | None = Field(None, max_length=4000)
+    ui: dict | None = Field(None, description="Escenario del frontend (edificios, vista) para reabrir el análisis")
     # exposición (análisis de impacto)
     scenario_name: str | None = None
     exposure: list[ExposureZone] | None = None
     exposure_points: list[tuple[float, float]] | None = Field(None, description="Elementos expuestos (p. ej. edificios): [[lon, lat], ...]")
     exposure_heights: list[float | None] | None = Field(None, description="Altura (m) de cada elemento expuesto, en el mismo orden; None = sin dato")
+    # inundación por lluvia en cuencas (engine = "flood")
+    storm: Storm | None = None
+    soil: Soil | None = None
+    debris: Debris | None = None
+    flood: FloodOptions | None = None
+    basins: BasinOptions | None = None
     # solo motor de partículas
     damping: float = Field(0.985, ge=0.8, le=1.0)
     dt: float = Field(0.35, gt=0.05, le=2.0)
@@ -204,10 +297,11 @@ class JobManager:
         self.lock = threading.Lock()
         threading.Thread(target=self._loop, daemon=True).start()
 
-    def submit(self, params: dict) -> str:
+    def submit(self, params: dict, ui: dict | None = None) -> str:
         jid = uuid.uuid4().hex[:12]
-        d = JOBS / jid
+        d = library.root / jid
         d.mkdir(parents=True)
+        library.save_request(d, params, ui)
         self.jobs[jid] = dict(id=jid, status="queued", stage="En cola", created=time.time(), params=params,
                               dir=str(d), proc=None, progress={})
         self.pending.put(jid)
@@ -255,6 +349,10 @@ class JobManager:
                     if "t" in msg:
                         job["stage"] = "Simulando"
                 elif msg["type"] == "done":
+                    try:
+                        library.finalize(Path(job["dir"]), created=job["created"])
+                    except Exception as e:  # el resultado queda igual disponible por /api/jobs
+                        job["library_error"] = str(e)
                     job.update(status="done", stage="Completada", finished=time.time())
                     finished = True
                 elif msg["type"] == "error":
@@ -262,12 +360,16 @@ class JobManager:
                     finished = True
             proc.join(timeout=5)
             job["proc"] = None
+            if job["status"] != "done":
+                shutil.rmtree(job["dir"], ignore_errors=True)
 
     def _cleanup(self, keep=8):
+        # los análisis terminados quedan en la biblioteca: acá solo se olvida el estado del job
         done = sorted((j for j in self.jobs.values() if j["status"] in ("done", "error", "cancelled")),
                       key=lambda j: j["created"])
         for j in done[:-keep]:
-            shutil.rmtree(j["dir"], ignore_errors=True)
+            if j["status"] != "done":
+                shutil.rmtree(j["dir"], ignore_errors=True)
             self.jobs.pop(j["id"], None)
 
     def public(self, jid):
@@ -289,6 +391,7 @@ jobs: JobManager | None = None
 @app.on_event("startup")
 def _startup():
     global jobs
+    library.import_legacy(JOBS)
     jobs = JobManager()
 
 
@@ -308,7 +411,8 @@ def capabilities():
         tv = metadata.version("taichi")
     except metadata.PackageNotFoundError:
         tv = None
-    return {"engines": ["mpm", "particles"] if tv else ["particles"], "taichi": tv, "devices": ["auto", "gpu", "cpu"]}
+    return {"engines": (["mpm", "particles"] if tv else ["particles"]) + ["flood"], "taichi": tv,
+            "devices": ["auto", "gpu", "cpu"]}
 
 
 @app.post("/api/dem/download")
@@ -401,6 +505,43 @@ def trigger_preview(req: SimRequest):
     return {"bodies": out, "dem_source": info["source"]}
 
 
+_terrain_cache: dict = {}
+
+
+@app.post("/api/basins")
+def basins(req: SimRequest, storm: bool = True):
+    """Cuencas, subcuencas y red de drenaje sobre el DEM, con la hidrología SCS de la tormenta (sin simular en 2D).
+
+    El análisis del terreno (relleno, direcciones de flujo, áreas) se guarda en memoria: cambiar los umbrales, las
+    salidas o la tormenta no lo recalcula."""
+    from . import flood, scenario
+    b = req.bbox
+    if b.east <= b.west or b.north <= b.south:
+        raise HTTPException(400, "BBox inválido")
+    if (b.east - b.west) > 1.0 or (b.north - b.south) > 1.0:
+        raise HTTPException(400, "Zona de cálculo demasiado grande (máx. 1° por lado)")
+    p = req.model_dump()
+    p["bbox"] = b.model_dump()
+    dx, _ = flood.flood_dx(p)
+    key = json.dumps([req.dataset, p["bbox"], dx, p.get("flood"), p.get("lakes"), p.get("burn_channels"), p.get("dams"),
+                      p.get("breach")], sort_keys=True, default=str)
+    try:
+        if key not in _terrain_cache:
+            _terrain_cache.clear()
+            _terrain_cache[key] = flood.prepare_terrain(p, lambda **kw: None)
+        g, T, dem_info, notes, warnings = _terrain_cache[key]
+        out = flood.basins_preview(g, T, p, with_storm=storm)
+    except dem.DemError as e:
+        raise HTTPException(502, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    out["warnings"] = warnings + out["warnings"]
+    out["terrain_notes"] = notes
+    out["dem_source"] = dem_info["source"]
+    return Response(json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=scenario._json_default),
+                    media_type="application/json")
+
+
 @app.post("/api/simulate")
 def simulate(req: SimRequest):
     b = req.bbox
@@ -410,9 +551,11 @@ def simulate(req: SimRequest):
         raise HTTPException(400, "Zona de cálculo demasiado grande (máx. 1° por lado)")
     if req.engine == "mpm" and capabilities()["taichi"] is None:
         raise HTTPException(400, "Taichi no está instalado: pip install -r backend/requirements.txt")
-    params = req.model_dump()
+    if req.engine != "flood" and req.duration_s > 10800:
+        raise HTTPException(400, "duration_s: hasta 10800 s con los motores MPM y de partículas")
+    params = req.model_dump(exclude={"ui"})
     params["bbox"] = b.model_dump()
-    jid = jobs.submit(params)
+    jid = jobs.submit(params, req.ui)
     return jobs.public(jid)
 
 
@@ -431,6 +574,8 @@ def job_cancel(jid: str):
 def _job_file(jid, name):
     j = jobs.jobs.get(jid)
     if not j:
+        if library.exists(jid):  # job de una sesión anterior del servidor: está en la biblioteca
+            return library.dir(jid) / name
         raise HTTPException(404, "Job inexistente")
     if j["status"] != "done":
         raise HTTPException(409, f"Job en estado {j['status']}")
@@ -447,6 +592,69 @@ def job_data(jid: str):
     return FileResponse(_job_file(jid, "data.bin"), media_type="application/octet-stream")
 
 
-@app.get("/")
-def root():
-    return {"message": "Suriyaco MassFlow 3D API", "docs": "/docs"}
+# ───────────────────────────── Biblioteca de análisis
+def _lib(aid):
+    if not library.exists(aid):
+        raise HTTPException(404, "Análisis inexistente")
+    return aid
+
+
+@app.get("/api/library")
+def library_list():
+    es = library.entries()
+    return {"analyses": es, "projects": sorted({e["project"] for e in es}, key=str.lower)}
+
+
+@app.get("/api/library/{aid}")
+def library_get(aid: str):
+    return library.get(_lib(aid))
+
+
+class LibraryPatch(BaseModel):
+    name: str | None = Field(None, max_length=160)
+    project: str | None = Field(None, max_length=120)
+    notes: str | None = Field(None, max_length=4000)
+
+
+@app.patch("/api/library/{aid}")
+def library_patch(aid: str, req: LibraryPatch):
+    return library.update(_lib(aid), **req.model_dump())
+
+
+@app.delete("/api/library/{aid}")
+def library_delete(aid: str):
+    j = jobs.jobs.get(aid)
+    if j and j["status"] in ("queued", "running"):
+        raise HTTPException(409, "El análisis todavía se está calculando")
+    library.delete(_lib(aid))
+    if j:
+        jobs.jobs.pop(aid, None)
+    return {"ok": True}
+
+
+@app.get("/api/library/{aid}/result")
+def library_result(aid: str):
+    _lib(aid)
+    try:
+        library.ensure_impact(aid)  # resultados anteriores a las zonas de afectación
+    except Exception as e:
+        print(f"[biblioteca] no se pudieron calcular las zonas de {aid}: {e}")
+    return FileResponse(library.dir(aid) / "result.json", media_type="application/json")
+
+
+@app.get("/api/library/{aid}/data.bin")
+def library_data(aid: str):
+    return FileResponse(library.dir(_lib(aid)) / "data.bin", media_type="application/octet-stream")
+
+
+@app.get("/api/library/{aid}/field/{name}")
+def library_field(aid: str, name: str):
+    """Un campo float32 (ny × nx) del resultado, sin descargar todo data.bin (informes y comparaciones)."""
+    try:
+        return Response(library.field_bytes(_lib(aid), name), media_type="application/octet-stream")
+    except KeyError:
+        raise HTTPException(404, f"El análisis no tiene el campo {name}")
+
+
+# Frontend estático en "/" (montado al final para no tapar las rutas /api)
+app.mount("/", StaticFiles(directory=ROOT / "frontend", html=True), name="frontend")

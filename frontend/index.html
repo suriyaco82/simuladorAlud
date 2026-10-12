@@ -17,128 +17,14 @@
 </header>
 <main>
 <aside>
-  <details open>
-    <summary data-help="sec-examples" data-ic="collection">Ejemplos</summary>
-    <label>Escenario precargado<select id="exampleSel"><option value="">— elegir —</option></select></label>
-    <div class="row">
-      <button class="tool" id="exLoad" data-ic="download">Cargar</button>
-      <button class="tool" id="exRun" data-ic="play">Cargar y simular</button>
-    </div>
-    <button class="tool" id="exEdit" title="Ver y editar todos los datos del ejemplo: parámetros, elementos, edificios (GlobalBuildingAtlas, CSV de campo)" data-ic="pencil">Editar datos / cargar datos de campo</button>
-    <div class="info" id="exInfo"></div>
-    <button class="tool" id="exClear" hidden data-ic="x">Quitar ejemplo (volver a modo libre)</button>
-  </details>
-
-  <details open>
-    <summary data-help="sec-zona" data-ic="extent">1 · Zona de cálculo</summary>
-    <label>Dataset
-      <select id="dataset" data-param="dataset">
-        <option value="SYNTHETIC">SYNTHETIC (prueba)</option><option value="COP30">COP30 · Copernicus 30 m</option><option value="ANADEM">ANADEM · Sudamérica</option><option value="NASADEM">NASADEM</option><option value="AW3D30">AW3D30 · ALOS</option><option value="SRTMGL1">SRTMGL1 · SRTM 30 m</option><option value="AWS_TERRAIN">AWS_TERRAIN · sin API key</option>
-      </select>
-    </label>
-    <label class="check"><input type="checkbox" id="dem_fallback" checked> Si OpenTopography falla, usar AWS Terrain Tiles</label>
-    <div class="grid2">
-      <label>Oeste<input id="west" type="number" step="0.001" value="-66.96"></label>
-      <label>Este<input id="east" type="number" step="0.001" value="-66.89"></label>
-      <label>Sur<input id="south" type="number" step="0.001" value="-29.41"></label>
-      <label>Norte<input id="north" type="number" step="0.001" value="-29.34"></label>
-    </div>
-    <div class="row">
-      <button class="tool" id="drawBox" title="Arrastrá sobre el mapa" data-ic="rectangle-plus">Dibujar en mapa</button>
-      <button class="tool" id="viewBox" title="Usa la extensión visible del mapa" data-ic="zoom-to-object">Vista actual</button>
-    </div>
-    <div class="info" id="gridInfo"></div>
-  </details>
-
-  <details open>
-    <summary data-help="sec-release" data-ic="polygon">2 · Desprendimiento</summary>
-    <div class="row">
-      <button class="tool" id="drawPoly" data-ic="polygon">Dibujar área</button>
-      <button class="tool" id="clearPoly" data-ic="trash">Borrar</button>
-    </div>
-    <p class="hint">Clic en el mapa agrega vértices; doble clic, Enter o clic en el primer vértice cierra; Esc cancela; Retroceso borra el último. Sin polígono se usa un círculo alrededor del punto de inicio (clic en el mapa).</p>
-    <label>Radio del círculo (m)<input type="number" data-param="release_radius_m" value="200" min="10" step="10"></label>
-    <label>Definir masa por
-      <select id="release_mode" data-param="release_mode">
-        <option value="thickness">Espesor medio</option>
-        <option value="volume">Volumen total</option>
-      </select>
-    </label>
-    <label id="thkLabel">Espesor medio (m)<input id="release_thickness_m" type="number" data-param="release_thickness_m" value="20" min="0.5" step="0.5"></label>
-    <label id="volLabel" hidden>Volumen (m³)<input id="release_volume_m3" type="number" data-param="release_volume_m3" value="2500000" min="1000" step="10000"></label>
-    <label>Perfil de espesor
-      <select data-param="thickness_profile">
-        <option value="dome">Domo (máx. en el centro, 0 en el borde)</option>
-        <option value="uniform">Uniforme</option>
-      </select>
-    </label>
-    <div class="info" id="releaseInfo"></div>
-  </details>
-
-  <details open id="rainSec" hidden>
-    <summary data-help="sec-rain" data-ic="rain">Desencadenante: lluvia</summary>
-    <div id="rainBody"></div>
-  </details>
-
-  <details open>
-    <summary data-help="sec-material" data-ic="cube">3 · Material</summary>
-    <label>Tipo de material<select id="preset"></select></label>
-    <div class="hint" id="presetNote"></div>
-    <div class="grid2">
-      <label>Densidad sólidos (kg/m³)<input type="number" data-param="density_solid" value="2650" step="10"></label>
-      <label>Porosidad<input type="number" data-param="porosity" value="0.35" min="0.05" max="0.7" step="0.01"></label>
-      <label>Fricción interna φ (°)<input type="number" data-param="friction_angle_deg" value="32" min="5" max="50" step="0.5"></label>
-      <label>Fricción basal δ (°)<input type="number" data-param="basal_friction_deg" value="16" min="1" max="45" step="0.5"></label>
-      <label>Viscosidad (Pa·s)<input type="number" data-param="viscosity_pa_s" value="50" min="0" step="10"></label>
-      <label>Módulo E (Pa)<input type="number" data-param="young_modulus" value="20000000" step="1000000"></label>
-    </div>
-  </details>
-
-  <details>
-    <summary data-help="sec-agua" data-ic="water-drop">4 · Agua y presión de poros</summary>
-    <label>Saturación Sr <output id="saturationOut">0.50</output><input id="saturation" type="range" data-param="saturation" min="0" max="1" step="0.05" value="0.5"></label>
-    <label class="check"><input type="checkbox" id="lamAuto" checked> λ inicial hidrostático (según Sr)</label>
-    <label id="lamLabel" hidden>λ inicial = p<sub>poros</sub>/σ <output id="lamOut">0.30</output><input id="pore_ratio_initial" type="range" min="0" max="0.95" step="0.01" value="0.3"></label>
-    <div class="grid2">
-      <label>Disipación T<sub>d</sub> (s)<input type="number" data-param="pore_diffusion_time_s" value="60" min="1" step="5"></label>
-      <label>Generación κ<input type="number" data-param="pore_generation" value="2" min="0" step="0.5"></label>
-    </div>
-    <p class="hint">Fricción efectiva tan φ·(1−λ). La contracción del material eleva λ (licuefacción) y la dilatancia lo reduce; λ se disipa hacia el valor hidrostático en un tiempo T<sub>d</sub>.</p>
-  </details>
-
-  <details>
-    <summary data-help="sec-erosion" data-ic="layers">5 · Erosión y deposición</summary>
-    <div class="grid2">
-      <label>Espesor erosionable (m)<input type="number" data-param="erodible_depth_m" value="0" min="0" step="0.5"></label>
-      <label>Coef. E<sub>s</sub> (1/m)<input type="number" data-param="entrainment_coeff" value="0.004" min="0" step="0.001"></label>
-      <label>Velocidad crítica (m/s)<input type="number" data-param="critical_velocity" value="1" min="0" step="0.5"></label>
-    </div>
-    <p class="hint">dz/dt = E<sub>s</sub>·h·|v| (McDougall &amp; Hungr). El lecho desciende y el material erosionado se incorpora al flujo. Depósito = material en reposo al final.</p>
-  </details>
-
-  <details open>
-    <summary data-help="sec-solver" data-ic="gear">6 · Solver</summary>
-    <div class="grid2">
-      <label>Motor
-        <select id="engine" data-param="engine">
-          <option value="mpm">MPM 3D</option>
-          <option value="particles">Partículas (rápido)</option>
-        </select>
-      </label>
-      <label>Dispositivo
-        <select data-param="device">
-          <option value="auto">Auto (GPU)</option>
-          <option value="gpu">GPU</option>
-          <option value="cpu">CPU</option>
-        </select>
-      </label>
-      <label>dx grilla (m)<input id="dx" type="number" data-param="dx" value="25" min="2" step="1"></label>
-      <label>Partículas/celda/eje<input type="number" data-param="ppc" value="3" min="1" max="5" step="1"></label>
-      <label>Duración (s)<input type="number" data-param="duration_s" value="120" min="5" max="10800" step="10"></label>
-      <label>Partículas visibles<input type="number" data-param="display_particles" value="30000" min="1000" step="1000"></label>
-    </div>
-  </details>
-
+  <div class="modebar" role="tablist" aria-label="Tipo de simulación">
+    <button type="button" class="mode-btn" data-mode="mass" data-ic="cube">Movimiento de masa</button>
+    <button type="button" class="mode-btn" data-mode="flood" data-ic="rain">Cuencas e inundación por lluvia</button>
+  </div>
+  <div class="steps-card">
+    <div class="steps-head"><b id="stepsMode">Pasos de la simulación</b><button class="tool" id="stepsOpen" data-ic="sliders-horizontal">Configurar</button></div>
+    <ol id="stepList"></ol>
+  </div>
   <div class="row">
     <button id="run" data-ic="play">Simular</button>
     <button id="cancel" class="secondary" disabled data-ic="stop">Cancelar</button>
@@ -146,11 +32,27 @@
   <div class="progress"><i id="bar"></i></div>
   <div id="status">Listo.</div>
   <div id="summary"></div>
+
+  <details open id="libSec">
+    <summary data-help="sec-library" data-ic="collection">Biblioteca de análisis <span id="libCount" class="sum-count"></span></summary>
+    <div class="grid2">
+      <label>Proyecto<select id="libProject"></select></label>
+      <label>Buscar<input id="libSearch" type="search" placeholder="nombre, notas…"></label>
+    </div>
+    <div id="libList"></div>
+    <div class="row">
+      <button class="tool" id="libCompare" disabled>Comparar</button>
+      <button class="tool" id="libReport" disabled>Informe</button>
+    </div>
+    <button class="tool" id="libClearSel" hidden data-ic="x">Quitar la selección</button>
+    <p class="hint">Marcá dos o más análisis para compararlos (indicadores, gráficos, mapas y edificios en común).</p>
+  </details>
   <div class="warning" data-ic="exclamation-mark-triangle">Modelo preliminar para exploración. No usar como predicción operacional, ingeniería ni zonificación de riesgo sin calibración/validación especializada.</div>
 </aside>
 
 <section>
   <div id="map"></div>
+  <div id="split" role="separator" aria-orientation="horizontal" aria-label="Cambiar el tamaño del mapa y de la vista 3D" tabindex="0" title="Arrastrá para agrandar el mapa o la vista 3D · doble clic: tamaño original"><span></span></div>
   <div id="scene">
     <canvas id="gl"></canvas>
     <div id="toolbar">
@@ -167,7 +69,7 @@
         <select id="colorBy">
           <option value="speed">Velocidad</option>
           <option value="pore">Presión de poros λ</option>
-          <option value="origin">Origen (desprendimiento / erosionado)</option>
+          <option value="origin">Origen / tipo (bloque, árbol)</option>
         </select></label>
       <label>Tamaño <input id="psize" type="range" min="0.3" max="3" step="0.1" value="1.2"></label>
       <label>Terreno
@@ -184,6 +86,9 @@
           <option value="current">Espesor actual del flujo (animado)</option>
           <option value="intensity">Intensidad (alta / media / baja)</option>
           <option value="max_pressure">Presión dinámica máx.</option>
+          <option value="max_cv">Concentración de sedimento máx. Cv</option>
+          <option value="max_hv">h·v máx.</option>
+          <option value="runoff_total">Lluvia efectiva (escorrentía)</option>
         </select></label>
       <label>Capa en el mapa
         <select id="mapLayer">
@@ -197,6 +102,8 @@
           <option value="deposit">Espesor de depósito</option>
           <option value="net_change">Cambio neto</option>
           <option value="arrival">Tiempo de arribo</option>
+          <option value="max_cv">Concentración de sedimento máx. Cv</option>
+          <option value="max_hv">h·v máx.</option>
         </select></label>
     </div>
     <div id="empty">Dibujá la zona y el área de desprendimiento, luego Simular.</div>
@@ -231,6 +138,155 @@
       <div><span data-ic="cube">Motor</span><b id="rcE">—</b></div>
     </div>
     <button class="secondary rc-cancel" id="rcCancel" data-ic="stop">Cancelar simulación</button>
+  </div>
+  <!-- asistente flotante: los pasos de configuración en orden -->
+  <div id="wizard" hidden role="dialog" aria-labelledby="wzTitle">
+    <div class="wz-head" id="wzHead">
+      <span class="wz-grip" data-ic="drag" title="Arrastrar"></span>
+      <div class="wz-titles"><small id="wzMode"></small><b id="wzTitle"></b></div>
+      <button class="wz-btn" id="wzMin" title="Minimizar" data-ic="chevron-up"></button>
+      <button class="wz-btn" id="wzClose" title="Cerrar (la configuración se conserva)" data-ic="x"></button>
+    </div>
+    <div class="wz-draw" id="wzDraw" hidden>Dibujando en el mapa… Esc cancela.</div>
+    <ol class="wz-steps" id="wzSteps"></ol>
+    <div class="wz-body" id="wzBody">
+      <details open id="exSec" data-step="start">
+        <summary data-help="sec-examples" data-ic="collection">Ejemplos</summary>
+        <label>Escenario precargado<select id="exampleSel"><option value="">— elegir —</option></select></label>
+        <div class="row">
+          <button class="tool" id="exLoad" data-ic="download">Cargar</button>
+          <button class="tool" id="exRun" data-ic="play">Cargar y simular</button>
+        </div>
+        <button class="tool" id="exEdit" title="Ver y editar todos los datos del ejemplo: parámetros, elementos, edificios (GlobalBuildingAtlas, CSV de campo)" data-ic="pencil">Editar datos / cargar datos de campo</button>
+        <div class="info" id="exInfo"></div>
+        <button class="tool" id="exClear" hidden data-ic="x">Quitar ejemplo (volver a modo libre)</button>
+      </details>
+      <details open id="zoneSec" data-step="zone">
+        <summary data-help="sec-zona" data-ic="extent">Zona de cálculo</summary>
+        <label>Dataset
+          <select id="dataset" data-param="dataset">
+            <option value="SYNTHETIC">SYNTHETIC (prueba)</option><option value="COP30">COP30 · Copernicus 30 m</option><option value="ANADEM">ANADEM · Sudamérica</option><option value="NASADEM">NASADEM</option><option value="AW3D30">AW3D30 · ALOS</option><option value="SRTMGL1">SRTMGL1 · SRTM 30 m</option><option value="AWS_TERRAIN">AWS_TERRAIN · sin API key</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="dem_fallback" checked> Si OpenTopography falla, usar AWS Terrain Tiles</label>
+        <div class="grid2">
+          <label>Oeste<input id="west" type="number" step="0.001" value="-66.96"></label>
+          <label>Este<input id="east" type="number" step="0.001" value="-66.89"></label>
+          <label>Sur<input id="south" type="number" step="0.001" value="-29.41"></label>
+          <label>Norte<input id="north" type="number" step="0.001" value="-29.34"></label>
+        </div>
+        <div class="row">
+          <button class="tool" id="drawBox" title="Arrastrá sobre el mapa" data-ic="rectangle-plus">Dibujar en mapa</button>
+          <button class="tool" id="viewBox" title="Usa la extensión visible del mapa" data-ic="zoom-to-object">Vista actual</button>
+        </div>
+        <div class="info" id="gridInfo"></div>
+        <div class="row">
+          <button class="tool" id="gbaLoad" title="Huellas y alturas LoD1 de GlobalBuildingAtlas (Zhu et al. 2025) dentro de la zona de cálculo" data-ic="urban-model">Edificios (GlobalBuildingAtlas)</button>
+          <button class="tool" id="gbaClear" title="Quitar los edificios cargados" data-ic="trash" hidden>Quitar edificios</button>
+        </div>
+        <div class="info" id="gbaInfo"></div>
+      </details>
+      <details open id="releaseSec" data-step="release">
+        <summary data-help="sec-release" data-ic="polygon">Desprendimiento</summary>
+        <div class="row">
+          <button class="tool" id="drawPoly" data-ic="polygon">Dibujar área</button>
+          <button class="tool" id="clearPoly" data-ic="trash">Borrar</button>
+        </div>
+        <p class="hint">Clic en el mapa agrega vértices; doble clic, Enter o clic en el primer vértice cierra; Esc cancela; Retroceso borra el último. Sin polígono se usa un círculo alrededor del punto de inicio (clic en el mapa).</p>
+        <label>Radio del círculo (m)<input type="number" data-param="release_radius_m" value="200" min="10" step="10"></label>
+        <label>Definir masa por
+          <select id="release_mode" data-param="release_mode">
+            <option value="thickness">Espesor medio</option>
+            <option value="volume">Volumen total</option>
+          </select>
+        </label>
+        <label id="thkLabel">Espesor medio (m)<input id="release_thickness_m" type="number" data-param="release_thickness_m" value="20" min="0.5" step="0.5"></label>
+        <label id="volLabel" hidden>Volumen (m³)<input id="release_volume_m3" type="number" data-param="release_volume_m3" value="2500000" min="1000" step="10000"></label>
+        <label>Perfil de espesor
+          <select data-param="thickness_profile">
+            <option value="dome">Domo (máx. en el centro, 0 en el borde)</option>
+            <option value="uniform">Uniforme</option>
+          </select>
+        </label>
+        <div class="info" id="releaseInfo"></div>
+      </details>
+      <details open id="rainSec" data-step="release" hidden>
+        <summary data-help="sec-rain" data-ic="rain">Desencadenante: lluvia</summary>
+        <div id="rainBody"></div>
+      </details>
+      <details open id="basinSec" data-step="basins" hidden>
+        <summary data-help="sec-basins" data-ic="rain">Cuencas y tormenta</summary>
+        <div id="basinBody"></div>
+      </details>
+      <details open id="materialSec" data-step="material">
+        <summary data-help="sec-material" data-ic="cube">Material</summary>
+        <label>Tipo de material<select id="preset"></select></label>
+        <div class="hint" id="presetNote"></div>
+        <div class="grid2">
+          <label>Densidad sólidos (kg/m³)<input type="number" data-param="density_solid" value="2650" step="10"></label>
+          <label>Porosidad<input type="number" data-param="porosity" value="0.35" min="0.05" max="0.7" step="0.01"></label>
+          <label>Fricción interna φ (°)<input type="number" data-param="friction_angle_deg" value="32" min="5" max="50" step="0.5"></label>
+          <label>Fricción basal δ (°)<input type="number" data-param="basal_friction_deg" value="16" min="1" max="45" step="0.5"></label>
+          <label>Viscosidad (Pa·s)<input type="number" data-param="viscosity_pa_s" value="50" min="0" step="10"></label>
+          <label>Módulo E (Pa)<input type="number" data-param="young_modulus" value="20000000" step="1000000"></label>
+        </div>
+      </details>
+      <details open id="aguaSec" data-step="water">
+        <summary data-help="sec-agua" data-ic="water-drop">Agua y presión de poros</summary>
+        <label>Saturación Sr <output id="saturationOut">0.50</output><input id="saturation" type="range" data-param="saturation" min="0" max="1" step="0.05" value="0.5"></label>
+        <label class="check"><input type="checkbox" id="lamAuto" checked> λ inicial hidrostático (según Sr)</label>
+        <label id="lamLabel" hidden>λ inicial = p<sub>poros</sub>/σ <output id="lamOut">0.30</output><input id="pore_ratio_initial" type="range" min="0" max="0.95" step="0.01" value="0.3"></label>
+        <div class="grid2">
+          <label>Disipación T<sub>d</sub> (s)<input type="number" data-param="pore_diffusion_time_s" value="60" min="1" step="5"></label>
+          <label>Generación κ<input type="number" data-param="pore_generation" value="2" min="0" step="0.5"></label>
+        </div>
+        <p class="hint">Fricción efectiva tan φ·(1−λ). La contracción del material eleva λ (licuefacción) y la dilatancia lo reduce; λ se disipa hacia el valor hidrostático en un tiempo T<sub>d</sub>.</p>
+      </details>
+      <details open id="erosionSec" data-step="erosion">
+        <summary data-help="sec-erosion" data-ic="layers">Erosión y deposición</summary>
+        <div class="grid2">
+          <label>Espesor erosionable (m)<input type="number" data-param="erodible_depth_m" value="0" min="0" step="0.5"></label>
+          <label>Coef. E<sub>s</sub> (1/m)<input type="number" data-param="entrainment_coeff" value="0.004" min="0" step="0.001"></label>
+          <label>Velocidad crítica (m/s)<input type="number" data-param="critical_velocity" value="1" min="0" step="0.5"></label>
+        </div>
+        <p class="hint">dz/dt = E<sub>s</sub>·h·|v| (McDougall &amp; Hungr). El lecho desciende y el material erosionado se incorpora al flujo. Depósito = material en reposo al final.</p>
+      </details>
+      <details open id="solverSec" data-step="run">
+        <summary data-help="sec-solver" data-ic="gear">Solver</summary>
+        <div class="grid2">
+          <label>Motor
+            <select id="engine" data-param="engine">
+              <option value="mpm">MPM 3D</option>
+              <option value="particles">Partículas (rápido)</option>
+              <option value="flood">Inundación por lluvia (cuencas)</option>
+            </select>
+          </label>
+          <label>Dispositivo
+            <select data-param="device">
+              <option value="auto">Auto (GPU)</option>
+              <option value="gpu">GPU</option>
+              <option value="cpu">CPU</option>
+            </select>
+          </label>
+          <label>dx grilla (m)<input id="dx" type="number" data-param="dx" value="25" min="2" step="1"></label>
+          <label>Partículas/celda/eje<input type="number" data-param="ppc" value="3" min="1" max="5" step="1"></label>
+          <label>Duración (s)<input type="number" data-param="duration_s" value="120" min="5" max="10800" step="10"></label>
+          <label>Partículas visibles<input type="number" data-param="display_particles" value="30000" min="1000" step="1000"></label>
+        </div>
+      </details>
+      <details open id="projSec" data-step="run">
+        <summary data-help="sec-project" data-ic="folder">Proyecto y análisis</summary>
+        <label>Proyecto<input id="projName" list="projList" maxlength="120" placeholder="p. ej. Riesgo aluvional La Rioja 2026" autocomplete="off"></label>
+        <datalist id="projList"></datalist>
+        <label>Nombre del análisis<input id="anaName" maxlength="160" placeholder="p. ej. Tormenta 100 años · CN 85" autocomplete="off"></label>
+        <label>Notas<textarea id="anaNotes" rows="2" maxlength="4000" placeholder="Supuestos, fuente de los datos, versión…"></textarea></label>
+        <p class="hint">Al terminar, el análisis se guarda en la biblioteca con este nombre y proyecto: después se puede reabrir sin volver a calcular.</p>
+      </details>
+    </div>
+    <div class="wz-foot">
+      <button class="secondary" id="wzPrev" data-ic="chevron-left">Anterior</button>
+      <button id="wzNext">Siguiente</button>
+    </div>
   </div>
   <div id="toasts" aria-live="assertive"></div>
 </section>
