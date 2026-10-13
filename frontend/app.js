@@ -7,6 +7,7 @@ import {ScenarioEditor} from './editor.js';
 import {ic, hydrateIcons} from './icons.js';
 import {RainPanel} from './rain.js';
 import {BasinsPanel, floodBasinsHTML, FLOW} from './basins.js';
+import {PlainPanel} from './plain.js';
 import {RAMPS, hexRGB} from './palette.js';
 import {ImpactZones} from './zones.js';
 import {LibraryPanel, loadAnalysis} from './library.js';
@@ -52,6 +53,7 @@ const LAYERS = {
   max_cv:     {name: 'Concentración de sedimento máx. Cv', unit: '', ramp: 'pore', mask: v => v > 0.01, fixed: [0, 0.6]},
   max_hv:     {name: 'h·v máx.', unit: 'm²/s', ramp: 'depth', mask: v => v > 0.05},
   runoff_total: {name: 'Lluvia efectiva (escorrentía)', unit: 'mm', ramp: 'arrival', mask: v => v > 0.5, always: true},
+  wet_time:   {name: 'Duración del anegamiento (h > 0,1 m)', unit: 'h', ramp: 'arrival', mask: v => v > 0.05},
 };
 
 // ───────────────────────────── Mapa
@@ -113,9 +115,12 @@ const wizard = new Wizard({
   onRun: () => $('run').click(),
   hints: {
     start: () => exposure.example && !exposure.example.free ? exposure.example.title : 'Modo libre (sin ejemplo)',
-    zone: () => `${$('dataset').value} · ${$('gridInfo').textContent.split('Zona grande')[0]}`,
+    zone: () => `${($('dataset').selectedOptions[0] || {}).text || $('dataset').value} · ${$('gridInfo').textContent.split('Zona grande')[0]}`,
     release: () => $('releaseInfo').innerHTML.replace(/<br\s*\/?>/g, ' · ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 90),
-    basins: () => { const st = basinsPanel.params().storm; return `Tormenta ${fmt(st.rain_mm ?? 60, 0)} mm en ${fmt(st.duration_h ?? 3, 2)} h · ${basinsPanel.data ? 'cuencas delineadas' : 'falta delinear las cuencas'}`; },
+    plain: () => { const v = plainPanel.v; return [v.flood.depressions === 'keep' ? 'bajos conservados' : null, v.infiltration.method === 'green_ampt' ? 'Green-Ampt' : 'SCS-CN',
+      v.inflows.length ? `${v.inflows.length} entrada(s) de caudal` : null, v.roads.items.length ? `${v.roads.items.length} caminos` : null,
+      v.landuse.worldcover || v.landuse.polygons.length ? 'uso del suelo' : null].filter(Boolean).join(' · '); },
+    basins: () => { const st = basinsPanel.params().storm; return `Tormenta ${fmt(st.rain_mm ?? 60, 0)} mm en ${fmt(st.duration_h ?? 3, 2)} h · ${basinsPanel.data ? 'cuencas delineadas' : plainPanel.skipBasins ? 'lluvia en toda la zona' : 'falta delinear las cuencas'}`; },
     material: () => $('preset').selectedOptions[0] && $('preset').selectedOptions[0].text,
     water: () => `Saturación ${(+$('saturation').value).toFixed(2)}`,
     erosion: () => { const v = +document.querySelector('[data-param=erodible_depth_m]').value; return v > 0 ? `Lecho erosionable de ${fmt(v)} m` : 'Sin erosión del lecho'; },
@@ -161,11 +166,127 @@ function setMode(m) {
   if (m) { map.dragging.disable(); map.doubleClickZoom.disable(); }
   else { map.dragging.enable(); map.doubleClickZoom.enable(); }
 }
-$('drawBox').onclick = () => setMode(drawMode === 'bbox' ? null : 'bbox');
+$('drawBox').onclick = () => { if (drawMode !== 'bbox') clearZoneOutline(); setMode(drawMode === 'bbox' ? null : 'bbox'); };
 $('drawPoly').onclick = () => setMode(drawMode === 'poly' ? null : 'poly');
 $('viewBox').onclick = () => {
+  clearZoneOutline();
   const b = map.getBounds().pad(-0.05);
   setBBox({west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth()}, false);
+};
+
+// DEM propios (MDE-Ar del IGN, LiDAR LAS/LAZ, GeoTIFF): se suben una vez, el backend los reproyecta a WGS84 y
+// quedan en «Dataset» como LOCAL:<id>
+let localDems = [], demOutline = null;
+const localDem = () => localDems.find(d => 'LOCAL:' + d.id === $('dataset').value) || null;
+function renderLocalDems(sel) {
+  const ds = $('dataset'), prev = sel || ds.value;
+  ds.querySelector('optgroup[data-local]')?.remove();
+  if (localDems.length) {
+    const og = document.createElement('optgroup');
+    og.label = 'DEM propios'; og.dataset.local = '1';
+    for (const d of localDems) og.append(new Option(`${d.name} · ${d.kind === 'lidar' ? 'LiDAR' : 'raster'} ${fmt(d.res_m, 1)} m`, 'LOCAL:' + d.id));
+    ds.append(og);
+  }
+  ds.value = prev;
+  if (!ds.value) ds.value = 'AWS_TERRAIN';  // el DEM elegido se borró
+  showLocalDem();
+}
+function showLocalDem() {
+  const d = localDem();
+  if (demOutline) { demOutline.remove(); demOutline = null; }
+  $('demFit').hidden = $('demDel').hidden = !d;
+  if (!d) { $('demInfo').innerHTML = localDems.length ? `${localDems.length} DEM propio${localDems.length > 1 ? 's' : ''} guardado${localDems.length > 1 ? 's' : ''}: elegilo en «Dataset».` : ''; return; }
+  const [w, s, e, n] = d.bounds;
+  demOutline = L.rectangle([[s, w], [n, e]], {color: '#3fa9f5', weight: 1.5, dashArray: '6 4', fill: false, interactive: false})
+    .bindTooltip(`DEM propio: ${esc(d.name)}`).addTo(map);
+  $('demLocalBox').open = true;
+  $('demInfo').innerHTML = `<b>${esc(d.name)}</b> · ${d.kind === 'lidar' ? `LiDAR, ${fmt(d.points, 0)} puntos · ${esc(d.method)}` : 'raster'} · celda ${fmt(d.res_m, 2)} m · ` +
+    `cotas ${fmt(d.zmin, 1)}–${fmt(d.zmax, 1)} m · ${esc(d.crs_src)} → WGS84. Fuera de su cobertura (rectángulo azul) se completa con AWS Terrain Tiles si está activada la opción de arriba.` +
+    (d.warnings || []).map(x => `<div class="hint">${esc(x)}</div>`).join('');
+}
+fetch(API + '/api/dem/local').then(r => r.json()).then(j => { localDems = j.dems || []; renderLocalDems(); }).catch(() => {});
+$('dataset').addEventListener('change', showLocalDem);
+$('demFile').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  if ($('demEpsg').value) fd.append('epsg', $('demEpsg').value);
+  if ($('demRes').value) fd.append('res_m', $('demRes').value);
+  fd.append('ground_only', $('demGround').checked);
+  $('demInfo').innerHTML = `${ic('refresh', 16, 'spin')} Procesando ${esc(file.name)} (${fmt(file.size / 1e6, 1)} MB)… una nube LiDAR grande puede tardar unos minutos.`;
+  try {
+    const r = await fetch(API + '/api/dem/upload', {method: 'POST', body: fd});
+    if (!r.ok) throw new Error(await errText(r));
+    const m = await r.json();
+    localDems.unshift(m);
+    renderLocalDems('LOCAL:' + m.id);
+    const b = bbox(), [w, s, ee, n] = m.bounds;
+    if (b.east < w || b.west > ee || b.north < s || b.south > n) $('demFit').click();
+    status(`DEM propio cargado: <b>${esc(m.name)}</b> (celda ${fmt(m.res_m, 2)} m). Ya está elegido como Dataset.`);
+  } catch (err) {
+    $('demInfo').innerHTML = `<span style="color:#f4b64c">No se pudo cargar el DEM: ${esc(err.message)}</span>`;
+    status('No se pudo cargar el DEM: ' + esc(err.message), true);
+  }
+};
+$('demFit').onclick = () => {
+  const d = localDem();
+  if (!d) return;
+  const [w, s, e, n] = d.bounds, mx = (e - w) * 0.01, my = (n - s) * 0.01;
+  clearZoneOutline();
+  setBBox({west: w + mx, south: s + my, east: e - mx, north: n - my});
+};
+$('demDel').onclick = async () => {
+  const d = localDem();
+  if (!d || !confirm(`¿Borrar el DEM propio «${d.name}» del servidor?`)) return;
+  await fetch(API + '/api/dem/local/' + d.id, {method: 'DELETE'}).catch(() => {});
+  localDems = localDems.filter(x => x.id !== d.id);
+  renderLocalDems('AWS_TERRAIN');
+};
+
+// Zona de cálculo desde un GeoJSON: la zona es la extensión de sus geometrías más un margen,
+// y el contorno queda dibujado como referencia
+let zoneOutline = null;
+function clearZoneOutline() { if (zoneOutline) { zoneOutline.remove(); zoneOutline = null; } }
+$('zoneGeojson').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';  // permite volver a elegir el mismo archivo
+  if (!file) return;
+  try {
+    const gj = JSON.parse(await file.text());
+    const name = gj.crs?.properties?.name || '';
+    if (name && !/4326|CRS84/i.test(name)) throw new Error(`el sistema de coordenadas es ${name}; exportalo en WGS84 (EPSG:4326, lon/lat)`);
+    const b = {west: Infinity, south: Infinity, east: -Infinity, north: -Infinity};
+    const walk = c => {
+      if (typeof c[0] === 'number') {
+        const [lon, lat] = c;
+        if (!(Math.abs(lon) <= 180 && Math.abs(lat) <= 90)) throw new Error(`coordenada fuera de rango (${lon}, ${lat}): el archivo no parece estar en lon/lat WGS84`);
+        b.west = Math.min(b.west, lon); b.east = Math.max(b.east, lon);
+        b.south = Math.min(b.south, lat); b.north = Math.max(b.north, lat);
+      } else c.forEach(walk);
+    };
+    const geom = g => {
+      if (!g) return;
+      if (g.type === 'GeometryCollection') g.geometries.forEach(geom);
+      else if (g.coordinates) walk(g.coordinates);
+    };
+    if (gj.type === 'FeatureCollection') gj.features.forEach(f => geom(f.geometry));
+    else if (gj.type === 'Feature') geom(gj.geometry);
+    else geom(gj);
+    if (!isFinite(b.west)) throw new Error('no tiene geometrías');
+    // margen del 5 % por lado (mínimo ~100 m) para que el contorno no quede pegado al borde del dominio
+    const padX = Math.max((b.east - b.west) * .05, .001), padY = Math.max((b.north - b.south) * .05, .001);
+    if (b.east - b.west + 2 * padX > 1 || b.north - b.south + 2 * padY > 1) throw new Error('la extensión supera 1° por lado');
+    if (drawMode === 'bbox') setMode(null);
+    setBBox({west: b.west - padX, south: b.south - padY, east: b.east + padX, north: b.north + padY});
+    clearZoneOutline();
+    zoneOutline = L.geoJSON(gj, {
+      style: {color: '#37d18e', weight: 2, dashArray: '6 4', fillOpacity: .06}, interactive: false,
+      pointToLayer: (_, ll) => L.circleMarker(ll, {radius: 4, color: '#37d18e', interactive: false}),
+    }).addTo(map);
+    status(`Zona de cálculo tomada de <b>${file.name}</b> (extensión de sus geometrías + 5 % de margen).`);
+  } catch (err) { status('GeoJSON inválido: ' + err.message, true); }
 };
 
 // Rectángulo: arrastrando, o con un clic en cada esquina
@@ -233,6 +354,7 @@ map.on('click', e => {
   if (suppressClick) { suppressClick = false; return; }
   if (editor.capturesMapClicks) return;
   if (basinsPanel.capturesMapClicks) { basinsPanel.addOutlet(e.latlng); return; }
+  if (plainPanel.capturesMapClicks) { plainPanel.onMapClick(e.latlng); return; }
   if (drawMode === 'poly') { addVertex(e.latlng); return; }
   if (drawMode) return;
   if (marker) marker.remove();
@@ -241,6 +363,7 @@ map.on('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && basinsPanel.capturesMapClicks) basinsPanel.setPicking(false);
+  if (e.key === 'Escape' && plainPanel.capturesMapClicks) plainPanel.setPick(null);
   if (!drawMode || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   if (e.key === 'Escape') setMode(null);
   if (drawMode === 'poly' && e.key === 'Enter') finishPoly();
@@ -361,6 +484,7 @@ async function applyExample(run) {
 function loadExample(ex, run, quiet = false) {
   const p = ex.params;
   setMode(null);
+  clearZoneOutline();
   setBBox(p.bbox, false);
   for (const [k, v] of Object.entries(p)) {
     const el = document.querySelector(`[data-param="${k}"]`);
@@ -377,6 +501,7 @@ function loadExample(ex, run, quiet = false) {
   exposure.set(ex);
   rainPanel.refresh();
   basinsPanel.load(p);
+  plainPanel.load(p);
   updateGbaInfo();
   applyEngine();
   setRelease(p.release_polygon ? p.release_polygon.map(([lo, la]) => L.latLng(la, lo)) : null);
@@ -415,11 +540,27 @@ const basinsPanel = new BasinsPanel({
   },
   startDraw: cb => { polyTarget = cb; setMode('poly'); status('Zona urbana: clic en el mapa agrega vértices; doble clic, Enter o clic en el primer vértice cierra; Esc cancela.'); },
 });
+// ───────────────────────────── Llanura: suelo, ríos que entran, caminos y uso del suelo (motor de inundación)
+const plainPanel = new PlainPanel({
+  api: API, map, sec: $('plainSec'), body: $('plainBody'), status, getBBox: () => bbox(), onPick: on => wizard.drawing(on),
+  startDraw: cb => { polyTarget = cb; setMode('poly'); status('Polígono de uso del suelo: clic agrega vértices; doble clic, Enter o clic en el primer vértice cierra; Esc cancela.'); },
+  onPreset: () => {
+    const st = basinsPanel.v.storm, simH = Math.max(basinsPanel.v.sim.sim_h || 0, (st.duration_h || 3) + 24);
+    basinsPanel.patch({flood: {landslides: false, boulders: 0, trees_per_km: 0, hillslope_erodible_m: 0, entrainment_coeff: 0},
+      debris: {channel_erodible_m: 0}, storm: {amc: 'III', areal_reduction: false}, sim: {sim_h: simH}});
+    if (!$('dataset').value.startsWith('LOCAL:') && $('dataset').value !== 'ANADEM') {
+      $('dataset').value = 'ANADEM'; $('dataset').dispatchEvent(new Event('change'));
+      toast('info', 'DEM cambiado a ANADEM', 'ANADEM es un modelo del terreno sin vegetación, mejor para llanura. Si tenés MDE-Ar o LiDAR, cargalo como DEM propio en el paso Zona de cálculo.', [], 9000);
+    }
+  },
+});
 const isFlood = () => $('engine').value === 'flood';
 // el motor de inundación no usa desprendimiento, material ni partículas: se muestran solo sus controles
 function applyEngine() {
   const fl = isFlood();
   basinsPanel.setVisible(fl);
+  plainPanel.setVisible(fl);
+  $('plainSec').hidden = !fl;
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', (b.dataset.mode === 'flood') === fl));
   $('basinSec').hidden = !fl;
   for (const id of ['releaseSec', 'materialSec', 'aguaSec', 'erosionSec']) $(id).hidden = fl;
@@ -602,6 +743,10 @@ function collectParams() {
   Object.assign(p, exposure.params());
   if (p.engine === 'flood') {
     Object.assign(p, basinsPanel.params());
+    const pp = plainPanel.params();
+    p.flood = {...p.flood, ...pp.flood};
+    delete pp.flood;
+    Object.assign(p, pp);
     const uz = basinsPanel.urbanZone;
     if (uz && !(p.exposure || []).length) p.exposure = [{name: 'Zona urbana', polygon: uz, erodible: false}];
   }
@@ -626,7 +771,7 @@ $('run').onclick = async () => {
     return;
   }
   if (isFlood()) {
-    const why = basinsPanel.checkReady();
+    const why = plainPanel.skipBasins ? null : basinsPanel.checkReady();
     if (why) {
       status(why, true);
       toast('warning', 'Falta definir las cuencas', why, [{label: 'Ir al panel', icon: 'arrow-up', primary: true, fn: () => wizard.show('basins')}], 10000);
@@ -723,7 +868,12 @@ async function loadResult(id, base = `${API}/api/jobs/${id}`) {
   zones.bindPanel($('summary'));
   bindAnalysisHeader();
   if (releaseOutline) releaseOutline.remove();
-  if (result.flood) basinsPanel.showResult(meta.flood.geo);
+  if (result.flood) {
+    basinsPanel.showResult(meta.flood.geo);
+    plainPanel.showResult(meta);
+    const ph = plainPanel.resultHTML(meta);
+    if (ph) ($('anaHead') || $('summary')).insertAdjacentHTML($('anaHead') ? 'afterend' : 'afterbegin', ph);
+  }
   releaseOutline = L.polygon(meta.release.polygon.map(([lo, la]) => [la, lo]), {color: '#ffd28a', weight: 1.5, dashArray: '4 3', fill: false, interactive: false}).addTo(map);
   if (pendingLayer && [...$('layer').options].some(o => o.value === pendingLayer)) { $('layer').value = pendingLayer; pendingLayer = null; applyLayer(); }
   simT = 0; dynKey = null; playing = false; updatePlayBtn(); showTime(0); refreshDynamic(true);

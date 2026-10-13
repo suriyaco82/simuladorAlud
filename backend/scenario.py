@@ -736,4 +736,4 @@ def _json_default(o):
 
 
 def write_json(path: Path, obj):
-    path.write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=_json_default))
+    path.write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=_json_default), encoding="utf-8")

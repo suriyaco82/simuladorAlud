@@ -156,6 +156,9 @@ def terrain(H, dx, pit_mode="carve", pit_depth_m=3.0):
         Hc = carve_barriers(H, rec4, np.argsort(-Z4.ravel(), kind="stable"), step4)
     elif pit_mode == "fill":
         Hc = Z.copy()
+    elif pit_mode == "keep":
+        # llanura: los bajos, lagunas y cañadas sin salida se conservan y el 2D los llena (almacenamiento real)
+        Hc = H.copy()
     else:
         Hc = fill_spurious_pits(H, Z, pit_depth_m)
     return dict(H=H, Z=Z, Hc=Hc, rec=rec, step=step, order=order, acc=acc, slope=slope,
@@ -796,7 +799,7 @@ def hydrology(T, D, storm, soil=None, debris=None, frame=None):
     dt_h = float(np.clip(min(tcs) / 5, 1 / 60, 1 / 6))
     dt_h = round(dt_h * 60) / 60 or 1 / 60
     t_end = Dh + 3 * max(b["tc_up_h"] for b in info.values()) + 1.0 if info else Dh + 1
-    t_end = min(t_end, 96.0)
+    t_end = min(t_end, max(96.0, Dh + 24.0))
     nT = int(math.ceil(t_end / dt_h)) + 1
     rain_inc = hyetograph(P, Dh, pattern, dt_h)
     # reducción areal según el área de la cuenca principal (una tormenta convectiva no cubre toda la cuenca)

@@ -89,6 +89,7 @@
           <option value="max_cv">Concentración de sedimento máx. Cv</option>
           <option value="max_hv">h·v máx.</option>
           <option value="runoff_total">Lluvia efectiva (escorrentía)</option>
+          <option value="wet_time">Duración del anegamiento</option>
         </select></label>
       <label>Capa en el mapa
         <select id="mapLayer">
@@ -104,6 +105,7 @@
           <option value="arrival">Tiempo de arribo</option>
           <option value="max_cv">Concentración de sedimento máx. Cv</option>
           <option value="max_hv">h·v máx.</option>
+          <option value="wet_time">Duración del anegamiento</option>
         </select></label>
     </div>
     <div id="empty">Dibujá la zona y el área de desprendimiento, luego Simular.</div>
@@ -165,10 +167,24 @@
         <summary data-help="sec-zona" data-ic="extent">Zona de cálculo</summary>
         <label>Dataset
           <select id="dataset" data-param="dataset">
-            <option value="SYNTHETIC">SYNTHETIC (prueba)</option><option value="COP30">COP30 · Copernicus 30 m</option><option value="ANADEM">ANADEM · Sudamérica</option><option value="NASADEM">NASADEM</option><option value="AW3D30">AW3D30 · ALOS</option><option value="SRTMGL1">SRTMGL1 · SRTM 30 m</option><option value="AWS_TERRAIN">AWS_TERRAIN · sin API key</option>
+            <option value="SYNTHETIC">SYNTHETIC (prueba)</option><option value="COP30">COP30 · Copernicus 30 m</option><option value="ANADEM">ANADEM · Sudamérica (terreno sin vegetación, recomendado en llanura)</option><option value="NASADEM">NASADEM</option><option value="AW3D30">AW3D30 · ALOS</option><option value="SRTMGL1">SRTMGL1 · SRTM 30 m</option><option value="AWS_TERRAIN">AWS_TERRAIN · sin API key</option>
           </select>
         </label>
-        <label class="check"><input type="checkbox" id="dem_fallback" checked> Si OpenTopography falla, usar AWS Terrain Tiles</label>
+        <label class="check"><input type="checkbox" id="dem_fallback" checked> Si OpenTopography falla, usar AWS Terrain Tiles (con un DEM propio: completar fuera de su cobertura)</label>
+        <details class="rain-soil" id="demLocalBox">
+          <summary>DEM propio: MDE-Ar (IGN), LiDAR LAS/LAZ, GeoTIFF</summary>
+          <label class="file-btn" data-ic="upload" title="GeoTIFF, IMG, ASC (raster) o nube de puntos LiDAR LAS/LAZ. Se reproyecta a WGS84 y queda guardado en el servidor">Cargar DEM propio<input id="demFile" type="file" accept=".tif,.tiff,.img,.asc,.vrt,.bil,.hgt,.las,.laz"></label>
+          <div class="grid2">
+            <label title="Solo si el archivo no declara su sistema de coordenadas. POSGAR 2007 Gauss-Krüger fajas 1–7: EPSG 5343–5349; UTM 19S–21S: 32719–32721">EPSG (si falta)<input id="demEpsg" type="number" placeholder="p. ej. 5347"></label>
+            <label title="Tamaño de celda al rasterizar una nube LiDAR. Vacío = automático según la densidad de puntos">Celda LiDAR (m)<input id="demRes" type="number" min="0.25" max="100" step="0.5" placeholder="auto"></label>
+          </div>
+          <label class="check"><input type="checkbox" id="demGround" checked> LiDAR: solo puntos de terreno (clase 2)</label>
+          <div class="info" id="demInfo"></div>
+          <div class="row">
+            <button class="tool" id="demFit" data-ic="zoom-to-object" hidden>Ajustar zona al DEM</button>
+            <button class="tool" id="demDel" data-ic="trash" hidden>Borrar DEM</button>
+          </div>
+        </details>
         <div class="grid2">
           <label>Oeste<input id="west" type="number" step="0.001" value="-66.96"></label>
           <label>Este<input id="east" type="number" step="0.001" value="-66.89"></label>
@@ -179,6 +195,7 @@
           <button class="tool" id="drawBox" title="Arrastrá sobre el mapa" data-ic="rectangle-plus">Dibujar en mapa</button>
           <button class="tool" id="viewBox" title="Usa la extensión visible del mapa" data-ic="zoom-to-object">Vista actual</button>
         </div>
+        <label class="file-btn" data-ic="upload" title="Archivo .geojson en WGS84 (lon/lat). La zona de cálculo toma la extensión de sus geometrías con un pequeño margen">Cargar GeoJSON<input id="zoneGeojson" type="file" accept=".geojson,.json,application/geo+json,application/json"></label>
         <div class="info" id="gridInfo"></div>
         <div class="row">
           <button class="tool" id="gbaLoad" title="Huellas y alturas LoD1 de GlobalBuildingAtlas (Zhu et al. 2025) dentro de la zona de cálculo" data-ic="urban-model">Edificios (GlobalBuildingAtlas)</button>
@@ -217,6 +234,10 @@
       <details open id="basinSec" data-step="basins" hidden>
         <summary data-help="sec-basins" data-ic="rain">Cuencas y tormenta</summary>
         <div id="basinBody"></div>
+      </details>
+      <details open id="plainSec" data-step="plain" hidden>
+        <summary data-help="sec-plain" data-ic="layers">Llanura: suelo, ríos y caminos</summary>
+        <div id="plainBody"></div>
       </details>
       <details open id="materialSec" data-step="material">
         <summary data-help="sec-material" data-ic="cube">Material</summary>

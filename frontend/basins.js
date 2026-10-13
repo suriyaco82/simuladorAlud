@@ -17,10 +17,10 @@ const COLS = ['#3fa9f5', '#ffd166', '#ef476f', '#06d6a0', '#c77dff', '#f4a261'];
 
 // [grupo, clave, etiqueta, mín, máx, paso, defecto, ayuda]; defecto null = el del backend
 const FIELDS = [
-  ['storm', 'rain_mm', 'Lluvia total (mm)', 0, 400, 5, 60, 'Lluvia puntual de la tormenta. Se reduce según el área de la cuenca (una tormenta convectiva no cubre toda la cuenca).'],
-  ['storm', 'duration_h', 'Duración (h)', 0.25, 48, 0.25, 3, 'Duración de la tormenta. Con la misma lluvia, menos horas = más intensidad = más escorrentía y caudales pico mayores.'],
+  ['storm', 'rain_mm', 'Lluvia total (mm)', 0, 1500, 5, 60, 'Lluvia puntual de la tormenta. Se reduce según el área de la cuenca (una tormenta convectiva no cubre toda la cuenca).'],
+  ['storm', 'duration_h', 'Duración (h)', 0.25, 240, 0.25, 3, 'Duración de la tormenta. Con la misma lluvia, menos horas = más intensidad = más escorrentía y caudales pico mayores.'],
   ['storm', 'cn', 'Número de curva CN', 30, 99, 1, 80, 'SCS-CN (humedad normal). Roca y suelo desnudo de sierras áridas: 80–90; pastizal: 60–75; bosque: 50–65. Se corrige por pendiente en cada celda.'],
-  ['sim', 'sim_h', 'Tiempo simulado (h)', 0.25, 48, 0.25, 4, 'Duración de la simulación 2D, desde el inicio de la lluvia. Tiene que cubrir la tormenta más el tiempo de concentración de la cuenca.'],
+  ['sim', 'sim_h', 'Tiempo simulado (h)', 0.25, 240, 0.25, 4, 'Duración de la simulación 2D, desde el inicio de la lluvia. Tiene que cubrir la tormenta más el tiempo de concentración de la cuenca.'],
   ['basins', 'subbasin_area_km2', 'Umbral de subcuenca (km²)', 0.1, 500, 0.5, 1, 'Se crea una subcuenca en cada confluencia de dos cauces mayores que este área.'],
   ['basins', 'stream_area_km2', 'Área mínima de cauce (km²)', 0.05, 50, 0.05, 0.5, 'Celdas con más área de aporte se dibujan como cauce.'],
   ['basins', 'min_basin_area_km2', 'Área mínima de cuenca (km²)', 0.1, 500, 0.5, 2, 'Cuencas principales más chicas se ignoran.'],
@@ -87,6 +87,12 @@ export class BasinsPanel {
     if (!this.v.basins.outlets) this.v.basins.outlets = [];
     if (p.engine === 'flood' && p.duration_s) this.v.sim.sim_h = Math.round(p.duration_s / 360) / 10;
     this.clearMap();
+    this.render();
+  }
+
+  // cambia valores desde afuera (preset de llanura) y redibuja el panel
+  patch(vals) {
+    for (const [g, o] of Object.entries(vals)) Object.assign(this.v[g], o);
     this.render();
   }
 

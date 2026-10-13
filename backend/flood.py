@@ -24,12 +24,27 @@ import time
 
 import numpy as np
 
-from . import dem, hydro, scenario
+from . import dem, hydro, landcover, roads, scenario
 
 G = 9.81
 RHO_W = 1000.0
 RHO_S = 2650.0
 CV_MAX = 0.6
+# parámetros de Green-Ampt por textura (Rawls, Brakensiek y Miller 1983): Ks (mm/h), succión del frente ψ (mm),
+# porosidad efectiva θe
+SOIL_TEXTURES = {
+    "arena": dict(name="Arena", ks_mm_h=117.8, suction_mm=49.5, porosity=0.417),
+    "arenoso_franco": dict(name="Arenoso franco", ks_mm_h=29.9, suction_mm=61.3, porosity=0.401),
+    "franco_arenoso": dict(name="Franco arenoso", ks_mm_h=10.9, suction_mm=110.1, porosity=0.412),
+    "franco": dict(name="Franco", ks_mm_h=3.4, suction_mm=88.9, porosity=0.434),
+    "franco_limoso": dict(name="Franco limoso", ks_mm_h=6.5, suction_mm=166.8, porosity=0.486),
+    "franco_arcillo_arenoso": dict(name="Franco arcillo arenoso", ks_mm_h=1.5, suction_mm=218.5, porosity=0.330),
+    "franco_arcilloso": dict(name="Franco arcilloso", ks_mm_h=1.0, suction_mm=208.8, porosity=0.309),
+    "franco_arcillo_limoso": dict(name="Franco arcillo limoso", ks_mm_h=1.0, suction_mm=273.0, porosity=0.432),
+    "arcillo_arenoso": dict(name="Arcillo arenoso", ks_mm_h=0.6, suction_mm=239.0, porosity=0.321),
+    "arcillo_limoso": dict(name="Arcillo limoso", ks_mm_h=0.5, suction_mm=292.2, porosity=0.423),
+    "arcilla": dict(name="Arcilla", ks_mm_h=0.3, suction_mm=316.3, porosity=0.385),
+}
 
 
 def _rheology_lut(p, n=256):
@@ -86,8 +101,18 @@ def prepare_terrain(p, progress):
         warnings.append(w)
     g = scenario.build_grid(arr, transform, p["bbox"], dx)
     notes = scenario.condition_terrain(g, p)
+    rnotes, g["roads_geo"] = roads.apply_embankments(g, p.get("roads"))
+    notes += rnotes
+    fl = {k: v for k, v in (p.get("flood") or {}).items() if v is not None}
+    pits = fl.get("depressions", "carve")
     progress(stage="Analizando el terreno: direcciones de flujo y cuencas…")
-    T = hydro.terrain(g["H_pre"], dx)
+    T = hydro.terrain(g["H_pre"], dx, pit_mode={"carve": "carve", "keep": "keep", "shallow": "pits"}.get(pits, "carve"),
+                      pit_depth_m=float(fl.get("pit_depth_m", 0.5)))
+    if pits == "keep":
+        notes.append("Depresiones del terreno conservadas (bajos y lagunas almacenan agua)")
+    elif pits == "shallow":
+        notes.append(f"Depresiones de menos de {float(fl.get('pit_depth_m', 0.5)):g} m rellenadas (artefactos del DEM); "
+                     "las más profundas se conservan")
     return g, T, dem_info, notes, warnings
 
 
@@ -155,12 +180,19 @@ def run_flood_job(job_dir, p, progress):
     bopt = basin_options(p)
     D = hydro.delineate(T, g["frame"], bopt)
     warnings += D["warnings"]
-    sel_ids, active, w = select_basins(T, D, bopt, g["frame"])
+    plain = bool(fl.get("rain_outside") or p.get("inflows"))
+    try:
+        sel_ids, active, w = select_basins(T, D, bopt, g["frame"])
+    except ValueError:
+        if not plain:
+            raise
+        # llanura: sin cuencas delineables (terreno plano) se llueve en toda la zona y entran los caudales de borde
+        sel_ids, active, w = [], np.ones((g["ny"], g["nx"]), bool), []
     warnings += w
     # el aviso de cuencas cortadas por el borde, solo para las que se simulan
     warnings = [x for x in warnings if "toca el borde" not in x]
     cut = [b["name"] for b in D["info"] if b["id"] in sel_ids and b.get("touches_border")]
-    if cut:
+    if cut and not fl.get("rain_outside"):
         warnings.append(f"{', '.join(cut)}: la cuenca toca el borde de la zona de cálculo y probablemente sigue afuera; "
                         "ampliá la zona para incluirla completa (la lluvia que cae afuera no se simula)")
     if fl.get("rain_outside"):
@@ -179,7 +211,16 @@ def run_flood_job(job_dir, p, progress):
         writer_holder["w"] = w
         return w
 
-    sim = FloodSim(g, T, D, HY, p, fl, storm, soil, debris, progress, sel_ids, active)
+    lu = landcover.grid(g, p.get("landuse"), progress=lambda msg: progress(stage=msg))
+    if lu is not None:
+        notes += lu["notes"]
+        warnings += lu["warnings"]
+    sim = FloodSim(g, T, D, HY, p, fl, storm, soil, debris, progress, sel_ids, active, landuse=lu)
+    warnings += sim.culvert_warnings
+    if sim.culverts:
+        notes.append(f"{len(sim.culverts)} alcantarilla{'s' if len(sim.culverts) > 1 else ''} bajo los terraplenes")
+    for q in sim.inflows:
+        notes.append(f"Entrada de caudal «{q['name']}»: pico {q['Q'].max():.0f} m³/s")
     writer, fields, info = sim.run(writer_factory)
 
     progress(stage="Escribiendo resultados…")
@@ -188,8 +229,9 @@ def run_flood_job(job_dir, p, progress):
         writer.add_array(k, {"terrain_pre": H_pre, "terrain_bed0": sim.z0.astype(np.float32),
                              "terrain_final": fields["bed_final"]}[k])
     for name in ("deposit", "erosion", "net_change", "max_depth", "max_speed", "max_pore", "arrival", "max_pressure",
-                 "intensity", "max_cv", "max_hv", "runoff_total"):
-        writer.add_array(name, fields[name])
+                 "intensity", "max_cv", "max_hv", "runoff_total", "wet_time"):
+        # la duración del anegamiento se guarda en horas (en `fields` queda en segundos para los informes)
+        writer.add_array(name, fields[name] / 3600 if name == "wet_time" else fields[name])
     meta = writer.close()
     meta["grid_frames"] = sim.grid_meta
 
@@ -275,12 +317,22 @@ def run_flood_job(job_dir, p, progress):
     result["exposure"]["points"] = impact.enrich_points(result["domain"], fields, p.get("exposure_points"),
                                                         p.get("exposure_heights"), exposure.get("points"))
     result["impact"] = impact.impact_zones(result["domain"], fields, exposure.get("points"), p.get("exposure_points"))
+    result["roads"] = roads.report(g, g.get("roads_geo"), fields, p.get("roads"))
+    result["landuse"] = landcover.report(lu, fields, dx)
+    if sim.ga:
+        result["flood"]["infiltration"] = sim.ga_info
+    if sim.inflows:
+        result["flood"]["inflows"] = [dict(name=q["name"], volume_m3=round(q["vol"], 0), q_peak=round(float(q["Q"].max()), 1),
+                                           t_h=np.round(q["t"] / 3600, 3).tolist(), Q=np.round(q["Q"], 2).tolist(),
+                                           section=p["inflows"][k]["section"])
+                                      for k, q in enumerate(sim.inflows)]
     return result
 
 
 class FloodSim:
-    def __init__(self, g, T, D, HY, p, fl, storm, soil, debris, progress, sel_ids=None, active=None):
+    def __init__(self, g, T, D, HY, p, fl, storm, soil, debris, progress, sel_ids=None, active=None, landuse=None):
         self.g, self.T, self.D, self.HY, self.p, self.fl = g, T, D, HY, p, fl
+        self.lu = landuse
         self.sel_ids = set(sel_ids or [b["id"] for b in D["info"] if b["down"] == 0])
         # celdas donde llueve: las cuencas elegidas (fuera de ellas el agua solo llega desde aguas arriba)
         self.active = np.ones((g["ny"], g["nx"]), bool) if active is None else active
@@ -309,6 +361,8 @@ class FloodSim:
 
         # rugosidad de Manning: cauces, laderas y zonas urbanas
         n = np.full((ny, nx), float(fl.get("manning_hillslope", 0.06)))
+        if landuse is not None:
+            n = landcover.per_cell(landuse, "manning", n)
         n[self.channel] = float(fl.get("manning_channel", 0.045))
         urban = np.zeros((ny, nx), bool)
         for z in p.get("exposure") or []:
@@ -331,12 +385,16 @@ class FloodSim:
 
         # CN por celda (pendiente + humedad antecedente); urbano casi impermeable; roca desnuda (muy empinada) alto
         CN2 = float(st.get("cn", 80.0))
+        if landuse is not None:
+            CN2 = landcover.per_cell(landuse, "cn", CN2)
         CN = hydro.cn_slope(hydro.cn_amc(CN2, st.get("amc", "II")), slope)
         CN = np.where(slope > math.radians(float(so.get("max_slope_deg", hydro.SOIL_DEFAULTS["max_slope_deg"]))),
                       np.maximum(CN, 92.0), CN)
         CN[urban] = float(fl.get("cn_urban", 92.0))
         self.S_ret = 25400.0 / CN - 254.0
         self.ia = float(st.get("ia_ratio", 0.2))
+        self._init_infiltration(urban)
+        self._init_inflows()
         mains = [b for b in D["info"] if b["id"] in self.sel_ids]
         self.arf = hydro.areal_reduction(max((b["area_up_km2"] for b in mains), default=1.0)) \
             if st.get("areal_reduction", True) else 1.0
@@ -376,6 +434,69 @@ class FloodSim:
         self.n_s, self.n_n = np.sqrt(self.n2y[0, :]), np.sqrt(self.n2y[-1, :])
         self._init_tracers(db, so)
         self._init_gauges()
+        self.culvert_warnings = self._init_culverts()
+
+    # ───────────────────────── infiltración continua (Green-Ampt), entradas de caudal y alcantarillas
+    def _init_infiltration(self, urban):
+        """Green-Ampt (Mein y Larson 1973) celda a celda sobre el agua en superficie, de lluvia o llegada de otro lado.
+
+        El suelo se satura cuando lo infiltrado llena los poros libres hasta la napa: ahí deja de infiltrar (exceso
+        por saturación). Sin infiltración continua se usa SCS-CN sobre la lluvia, como antes."""
+        inf = {k: v for k, v in (self.p.get("infiltration") or {}).items() if v is not None}
+        self.ga = inf.get("method", "scs") == "green_ampt"
+        self.evap = float(inf.get("evaporation_mm_day", 0.0)) / 1000 / 86400  # m/s
+        if not self.ga:
+            return
+        tex = SOIL_TEXTURES.get(inf.get("texture", "franco"), SOIL_TEXTURES["franco"])
+        ks = float(inf.get("ks_mm_h", tex["ks_mm_h"])) / 1000 / 3600  # m/s
+        psi = float(inf.get("suction_mm", tex["suction_mm"])) / 1000
+        theta_e = float(inf.get("porosity", tex["porosity"]))
+        se0 = float(inf.get("initial_saturation", 0.5))
+        dtheta = max(theta_e * (1 - se0), 1e-3)
+        wt = inf.get("water_table_m")
+        Ks = np.full((self.ny, self.nx), ks)
+        if self.lu is not None:
+            Ks *= landcover.per_cell(self.lu, "ks_factor", 1.0)
+        Ks[urban] *= 0.05
+        self.Ks, self.psi_dt = Ks, psi * dtheta
+        # capacidad hasta la napa (m de agua); sin napa, sin límite
+        self.F_cap = np.full((self.ny, self.nx), dtheta * float(wt) if wt is not None else np.inf)
+        self.F = np.zeros((self.ny, self.nx))
+        self.ga_info = dict(texture=inf.get("texture", "franco"), ks_mm_h=round(ks * 3.6e6, 2), suction_mm=round(psi * 1000, 1),
+                            porosity=theta_e, initial_saturation=se0, water_table_m=wt,
+                            storage_mm=round(dtheta * float(wt) * 1000, 0) if wt is not None else None)
+
+    def _infiltrate(self, h, dt):
+        """Infiltración del paso (m de agua por celda); modifica h in situ."""
+        F = self.F
+        rate = self.Ks * (1 + self.psi_dt / np.maximum(F, 1e-3))
+        dF = np.minimum(np.minimum(rate * dt, h), np.maximum(self.F_cap - F, 0))
+        h -= dF
+        F += dF
+        return dF
+
+    def _init_inflows(self):
+        """Hidrogramas de entrada Q(t) (m³/s) en una sección (crecida que llega de aguas arriba de la zona)."""
+        fr, dx = self.g["frame"], self.dx
+        self.inflows = []
+        for k, q in enumerate(self.p.get("inflows") or []):
+            (lo0, la0), (lo1, la1) = q["section"][0], q["section"][-1]
+            x0, y0 = fr.to_xy(lo0, la0)
+            x1, y1 = fr.to_xy(lo1, la1)
+            cells = _section_cells((float(x0), float(y0)), (float(x1), float(y1)), dx, self.nx, self.ny)
+            zc = self.z0.ravel()[cells]
+            # el caudal entra concentrado en las celdas más bajas de la sección (el cauce)
+            w = (zc.max() - zc + 0.1) ** 2
+            hy = np.asarray(q["hydrograph"], float)
+            hy = hy[np.argsort(hy[:, 0])]
+            self.inflows.append(dict(name=q.get("name") or f"Entrada {k + 1}", cells=cells, w=w / w.sum(),
+                                     t=hy[:, 0] * 3600, Q=np.maximum(hy[:, 1], 0), vol=0.0,
+                                     cv=float(q.get("cv") or 0.0)))
+
+    def _init_culverts(self):
+        links, w = roads.culvert_links(self.g, self.g.get("roads_geo"), (self.p.get("roads") or {}).get("culverts"))
+        self.culverts = links
+        return w
 
     # ───────────────────────── trazadores: bloques de roca y árboles
     def _init_tracers(self, db, so):
@@ -569,6 +690,9 @@ class FloodSim:
         inten = np.zeros((ny, nx), np.float32)
         arrival = np.full((ny, nx), -1.0, np.float32)
         outflow = 0.0
+        infil_vol = evap_vol = culv_vol = 0.0
+        wet_time = np.zeros((ny, nx), np.float32)
+        dt_max = float(fl.get("dt_max", 10.0))
         ls_vol = 0.0
         ls_cells = 0
         h_arr = float(fl.get("arrival_depth_m", 0.15))
@@ -630,7 +754,7 @@ class FloodSim:
             qcx, qcy, u, v = cell_velocity(h, qx, qy)
             vmax = float(np.sqrt(u * u + v * v)[h > 0.01].max()) if (h > 0.01).any() else 0.0
             dt = 0.7 * dx / (math.sqrt(G * max(hmax, 0.01)) + vmax)
-            dt = min(dt, 10.0, next_frame - t if next_frame > t else 10.0, self.duration - t)
+            dt = min(dt, dt_max, next_frame - t if next_frame > t else dt_max, self.duration - t)
             dt = max(dt, 0.02)
 
             # ── salida de cuadros y aforos (estado al comienzo del paso)
@@ -753,15 +877,39 @@ class FloodSim:
             np.maximum(h, 0, out=h)
             np.clip(hs, 0, CV_MAX * h, out=hs)
 
-            # ── lluvia efectiva (SCS-CN por celda)
+            # ── lluvia: efectiva por SCS-CN, o total con infiltración continua (Green-Ampt)
             if t < self.rain_t[-1]:
                 Pn = float(np.interp(t + dt, self.rain_t, self.rain_c))
                 if Pn > rain_prev:
-                    Ia = self.ia * self.S_ret
-                    pe = np.where(self.active & (Pn > Ia), (Pn - Ia) ** 2 / (Pn - Ia + self.S_ret), 0.0)
-                    h += (pe - pe_prev) / 1000.0
-                    pe_prev = pe
+                    if self.ga:
+                        h[self.active] += (Pn - rain_prev) / 1000.0
+                    else:
+                        Ia = self.ia * self.S_ret
+                        pe = np.where(self.active & (Pn > Ia), (Pn - Ia) ** 2 / (Pn - Ia + self.S_ret), 0.0)
+                        h += (pe - pe_prev) / 1000.0
+                        pe_prev = pe
                     rain_prev = Pn
+            # ── caudales que entran por las secciones de borde
+            for q in self.inflows:
+                Qn = float(np.interp(t + dt / 2, q["t"], q["Q"]))
+                if Qn > 0:
+                    V = Qn * dt
+                    hf, sf = h.ravel(), hs.ravel()
+                    hf[q["cells"]] += V * q["w"] / A
+                    if q["cv"] > 0:
+                        sf[q["cells"]] += q["cv"] * V * q["w"] / A
+                    q["vol"] += V
+            # ── infiltración del agua en superficie, evaporación y alcantarillas
+            if self.ga:
+                infil_vol += float(self._infiltrate(h, dt).sum()) * A
+            if self.evap > 0:
+                e = np.minimum(h, self.evap * dt)
+                h -= e
+                evap_vol += float(e.sum()) * A
+            if self.culverts:
+                culv_vol += roads.culvert_step(h.ravel(), z.ravel(), self.culverts, dt, A)
+            if self.ga or self.evap > 0:
+                np.clip(hs, 0, CV_MAX * h, out=hs)
 
             # ── erosión y depósito (equilibrio de Takahashi)
             qcx, qcy, u, v = cell_velocity(h, qx, qy)
@@ -801,6 +949,7 @@ class FloodSim:
             np.maximum(max_cv, np.where(wet, cv, 0), out=max_cv, casting="unsafe")
             np.maximum(max_hv, h * spw, out=max_hv, casting="unsafe")
             np.maximum(max_pd, (RHO_W + cv * (RHO_S - RHO_W)) * spw ** 2 / 1000, out=max_pd, casting="unsafe")
+            wet_time[h > 0.1] += dt
             newly = (arrival < 0) & (h > h_arr)
             arrival[newly] = t
             now = time.time()
@@ -820,13 +969,17 @@ class FloodSim:
         deposit = np.maximum(z - self.z0, 0) + hs / (1 - self.nb)
         erosion = np.maximum(self.z0 - z, 0)
         rain_total = np.interp(self.duration, self.rain_t, self.rain_c)
-        runoff_total = pe_prev
+        if self.ga:
+            runoff_total = np.maximum(np.where(self.active, rain_prev, 0.0) - self.F * 1000, 0)
+        else:
+            runoff_total = pe_prev
         fields = dict(
             deposit=deposit.astype(np.float32), erosion=erosion.astype(np.float32),
             net_change=(z + hs / (1 - self.nb) - self.z0).astype(np.float32),
             max_depth=max_h, max_speed=max_v, max_pore=np.zeros_like(max_h), arrival=arrival,
             max_pressure=max_pd, intensity=inten, max_cv=max_cv, max_hv=max_hv,
             runoff_total=runoff_total.astype(np.float32),
+            wet_time=wet_time,
             bed_final=z.astype(np.float32),
         )
         # trazadores: resumen
@@ -843,13 +996,22 @@ class FloodSim:
             j, i = self._cell(self.bx[self.b_on], self.by[self.b_on])
             boulders_urban = int((self.urban[j, i] & self.b_moved[self.b_on]).sum())
         rain_vol = float(rain_total) / 1000 * float(self.active.sum()) * A
-        runoff_vol = float(pe_prev.sum()) / 1000 * A
+        inflow_vol = float(sum(q["vol"] for q in self.inflows))
+        if self.ga:
+            # escurrimiento neto: lo que no se infiltró ni evaporó (incluye el agua que entró por los bordes)
+            runoff_vol = max(rain_vol + inflow_vol - infil_vol - evap_vol, 0.0)
+        else:
+            runoff_vol = float(pe_prev.sum()) / 1000 * A
         fp = max_h > 0.1
         reach = 0.0
         totals = dict(
             rain_mm=round(float(rain_total), 1), rain_m3=round(rain_vol, 0), runoff_m3=round(runoff_vol, 0),
-            infiltration_m3=round(rain_vol - runoff_vol, 0),
-            runoff_coeff=round(runoff_vol / rain_vol, 3) if rain_vol > 0 else 0,
+            infiltration_m3=round(infil_vol if self.ga else rain_vol - runoff_vol, 0),
+            runoff_coeff=round(min(runoff_vol / (rain_vol + inflow_vol), 1.0), 3) if rain_vol + inflow_vol > 0 else 0,
+            inflow_m3=round(inflow_vol, 0), evaporation_m3=round(evap_vol, 0), culvert_m3=round(culv_vol, 0),
+            infiltration_method="green_ampt" if self.ga else "scs",
+            saturated_area_km2=round(float((self.F >= self.F_cap - 1e-6).sum()) * A / 1e6, 2) if self.ga else None,
+            flooded_24h_km2=round(float((wet_time >= 86400).sum()) * A / 1e6, 2),
             outflow_m3=round(outflow, 0), stored_m3=round(float(h.sum()) * A, 0),
             landslide_cells=ls_cells, landslide_m3=round(ls_vol, 0),
             eroded_m3=round(float(erosion.sum()) * A, 0), deposited_m3=round(float(deposit.sum()) * A, 0),

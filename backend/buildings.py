@@ -143,7 +143,7 @@ def fetch_gba(west, south, east, north):
     key = hashlib.sha1(f"gba1:{west:.5f},{south:.5f},{east:.5f},{north:.5f}".encode()).hexdigest()[:12]
     cache = CACHE / f"GBA_{key}.json"
     if cache.exists():
-        return json.loads(cache.read_text())
+        return json.loads(cache.read_text(encoding="utf-8"))
     try:
         import pyarrow  # noqa: F401
     except ImportError as e:
@@ -173,5 +173,5 @@ def fetch_gba(west, south, east, north):
                attribution="GlobalBuildingAtlas LoD1 (Zhu et al., 2025, TUM; doi:10.14459/2025mp1782307), "
                            "versión Parquet de Source Cooperative. Polígonos ODbL (OSM, Microsoft) y CC BY-NC.")
     CACHE.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps(res))
+    cache.write_text(json.dumps(res), encoding="utf-8")
     return res

@@ -59,6 +59,23 @@ Verificación del agua (`python -m backend.validation gpu --agua`):
 - **Ruptura de presa sobre fondo liso:** el frente avanza −14% respecto de 2·√(g·h₀) (Ritter), sin cambios entre dx 2 y 1 m. Es lo habitual en modelos numéricos, porque la solución ideal supone una punta infinitamente delgada.
 - **Lámina con Voellmy:** entre −14% y −32% respecto de √(ξ·h·sin θ) con el espesor medido. La lámina sigue adelgazándose durante la prueba y no llega al régimen uniforme, así que es una verificación aproximada.
 
+## Inundación en llanura
+
+Son opciones del motor `flood`. Ninguna está activa por defecto.
+
+- **Depresiones** (`flood.depressions`):
+  - `carve` (por defecto) abre salida a todo pozo con caminos D4;
+  - `keep` usa el DEM sin modificar, así que los bajos y lagunas almacenan agua en el 2D;
+  - `shallow` rellena solo los pozos de menos de `pit_depth_m`.
+
+  La delineación de cuencas usa siempre el DEM rellenado (Priority-Flood).
+- **Infiltración Green-Ampt** (`infiltration.method = "green_ampt"`). La lluvia cae entera sobre la grilla y en cada paso infiltra f = Ks·(1 + ψ·Δθ/F), limitada por el agua disponible en la celda y por la capacidad hasta la napa, F ≤ Δθ·z_napa, con Δθ = θe·(1 − Se₀). Al llenarse, la celda deja de infiltrar (exceso por saturación). No hay redistribución ni recarga entre eventos. Ks se multiplica por el factor del uso del suelo y por 0,05 en zonas urbanas. La evaporación descuenta una lámina constante del agua en superficie.
+- **Entradas de caudal** (`inflows`). Q(t) se suma como fuente en las celdas de la sección, ponderadas por (z_max − z + 0,1)², de modo que el agua entra por el cauce.
+- **Terraplenes** (`roads`). Cada camino se levanta a la mediana del terreno en ~100 m de su eje más la altura de su categoría, en su ancho, sin bajar nunca el terreno. Los puentes no se levantan. Con `depressions = carve`, la apertura de pozos también corta los terraplenes donde cruzan un drenaje. En llanura conviene `keep` con alcantarillas.
+- **Alcantarillas**. Unen las celdas a ambos lados del terraplén con Q = Cd·A·√(2g·Δη), Cd = 0,6. El área mojada se reduce con h/D si la entrada no está sumergida, y el volumen por paso queda limitado para no invertir el desnivel.
+- **Uso del suelo** (`landuse`). La clase de cada celda (WorldCover o polígonos) define CN (condición II), el Manning fuera de los cauces y el factor de Ks.
+- **Informes**. Caminos: profundidad máxima sobre la calzada, muestreada cada dx/2 (umbrales de Shand et al. 2011). Uso del suelo: superficie con h > 0,1 m y tiempo acumulado con h > 0,1 m.
+
 ## CPU / GPU
 
 El solver está escrito en [Taichi](https://www.taichi-lang.org/): el mismo código se compila para CPU (LLVM, multinúcleo) o GPU (Metal en macOS, CUDA o Vulkan). `device: auto` intenta usar la GPU y, si no hay, cae a CPU.

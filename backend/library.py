@@ -13,6 +13,15 @@ from pathlib import Path
 
 import numpy as np
 
+
+def read_json(path):
+    """JSON en UTF-8; los guardados antes en Windows con la codificación del sistema (cp1252) también se leen."""
+    raw = Path(path).read_bytes()
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return json.loads(raw.decode("cp1252"))
+
 ENGINES = {"mpm": "MPM 3D", "particles": "Partículas", "flood": "Inundación por lluvia"}
 LEGACY_PROJECT = "Análisis anteriores"
 
@@ -36,13 +45,13 @@ class Library:
 
     # ── escritura
     def save_request(self, d: Path, params: dict, ui: dict | None):
-        (d / "params.json").write_text(json.dumps(params, ensure_ascii=False))
+        (d / "params.json").write_text(json.dumps(params, ensure_ascii=False), encoding="utf-8")
         if ui:
-            (d / "ui.json").write_text(json.dumps(ui, ensure_ascii=False))
+            (d / "ui.json").write_text(json.dumps(ui, ensure_ascii=False), encoding="utf-8")
 
     def finalize(self, d: Path, created: float | None = None, project: str | None = None, name: str | None = None):
         """Escribe entry.json a partir de result.json (al terminar una simulación o al importar)."""
-        res = json.loads((d / "result.json").read_text())
+        res = read_json((d / "result.json"))
         params = self._json(d / "params.json") or {}
         created = created or (d / "result.json").stat().st_mtime
         name = name or params.get("analysis_name") or res.get("scenario_name") or \
@@ -52,7 +61,7 @@ class Library:
                      scenario=res.get("scenario_name"), dataset=res.get("dataset"), dem_source=res.get("dem_source"),
                      bbox=params.get("bbox") or {k: res["domain"][k] for k in ("west", "south", "east", "north")},
                      kpis=kpis(res))
-        (d / "entry.json").write_text(json.dumps(entry, ensure_ascii=False))
+        (d / "entry.json").write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
         return entry
 
     def import_legacy(self, jobs_dir: Path):
@@ -81,7 +90,7 @@ class Library:
     # ── lectura
     @staticmethod
     def _json(p: Path):
-        return json.loads(p.read_text()) if p.exists() else None
+        return read_json(p) if p.exists() else None
 
     def entries(self):
         out = []
@@ -106,7 +115,7 @@ class Library:
         for k in ("name", "project", "notes"):
             if kw.get(k) is not None:
                 e[k] = str(kw[k]).strip() or e[k]
-        (d / "entry.json").write_text(json.dumps(e, ensure_ascii=False))
+        (d / "entry.json").write_text(json.dumps(e, ensure_ascii=False), encoding="utf-8")
         return e
 
     def delete(self, aid):
@@ -118,7 +127,7 @@ class Library:
     def fields(self, aid, names=None):
         """Campos float32 (ny × nx) guardados en data.bin."""
         d = self.dir(aid)
-        res = json.loads((d / "result.json").read_text())
+        res = read_json((d / "result.json"))
         arrays = res["arrays"]
         out = {}
         with open(d / "data.bin", "rb") as f:
@@ -140,7 +149,7 @@ class Library:
         """Agrega las zonas de afectación y el grado de daño a un resultado guardado antes de que existieran."""
         from . import impact
         d = self.dir(aid)
-        res = json.loads((d / "result.json").read_text())
+        res = read_json((d / "result.json"))
         if "impact" in res:
             return False
         _, F = self.fields(aid, ["intensity", "max_depth", "max_speed", "max_pressure", "arrival", "deposit", "max_cv"])
@@ -160,7 +169,7 @@ class Library:
         e = self._json(d / "entry.json")
         if e:
             e["kpis"] = kpis(res)
-            (d / "entry.json").write_text(json.dumps(e, ensure_ascii=False))
+            (d / "entry.json").write_text(json.dumps(e, ensure_ascii=False), encoding="utf-8")
         return True
 
 

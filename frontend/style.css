@@ -58,6 +58,10 @@ button.tool{font-size:13px;padding:7px 10px;font-weight:500;color:var(--t1);bord
 button.tool .ic{color:var(--brand)}
 button.tool.active{background:var(--brand);color:#fff;border-color:var(--brand)}
 button.tool.active .ic{color:#fff}
+label.file-btn{display:flex;align-items:center;justify-content:center;margin:0 0 6px;padding:7px 10px;border:1px solid var(--b1);border-radius:2px;background:var(--fg1);color:var(--t1);font:500 13px var(--font);cursor:pointer}
+label.file-btn:hover{background:var(--brand-l)}
+label.file-btn .ic{color:var(--brand);margin-right:7px}
+label.file-btn input{display:none}
 button:disabled{opacity:.5;cursor:default;pointer-events:none}
 #run{font-size:15px;padding:11px;white-space:nowrap}
 #run .ic,#cancel .ic{flex:none}

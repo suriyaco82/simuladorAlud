@@ -15,14 +15,14 @@ from typing import Literal
 
 import numpy as np
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import buildings, dem
+from . import buildings, dem, localdem
 from .library import Library
 from .worker import run_job
 
@@ -137,7 +137,7 @@ class ErodibleZone(BaseModel):
 class Storm(BaseModel):
     """Tormenta de diseño para el motor de inundación por lluvia."""
     rain_mm: float = Field(60.0, ge=0, le=1500, description="Lluvia total de la tormenta (mm, puntual)")
-    duration_h: float = Field(3.0, gt=0.05, le=72, description="Duración de la tormenta (h)")
+    duration_h: float = Field(3.0, gt=0.05, le=240, description="Duración de la tormenta (h); en llanura, lluvias de varios días")
     pattern: Literal["uniforme", "adelantado", "centrado", "atrasado", "bloques"] = Field(
         "adelantado", description="Forma del hietograma")
     cn: float = Field(80.0, ge=30, le=99, description="Número de curva SCS (condición de humedad II)")
@@ -192,6 +192,63 @@ class FloodOptions(BaseModel):
     rain_outside: bool | None = Field(None, description="Llover también fuera de las cuencas elegidas")
     theta: float | None = Field(None, ge=0.5, le=1)
     froude_max: float | None = Field(None, gt=0.3, le=5)
+    depressions: Literal["carve", "keep", "shallow"] | None = Field(
+        None, description="Depresiones del DEM: carve abre salida (montaña, por defecto) · keep conserva bajos y lagunas "
+                          "(llanura) · shallow rellena solo las de menos de pit_depth_m")
+    pit_depth_m: float | None = Field(None, gt=0, le=20, description="Profundidad máxima de las depresiones que se rellenan (shallow)")
+    dt_max: float | None = Field(None, ge=1, le=60, description="Paso de tiempo máximo (s); más alto acelera simulaciones de días")
+
+
+class Infiltration(BaseModel):
+    """Infiltración continua (Green-Ampt) sobre el agua en superficie, con saturación del suelo hasta la napa."""
+    method: Literal["scs", "green_ampt"] = Field("scs", description="scs: SCS-CN sobre la lluvia (como antes) · green_ampt: continua")
+    texture: str | None = Field(None, description="Textura del suelo (Rawls et al. 1983): arena … arcilla")
+    ks_mm_h: float | None = Field(None, gt=0, le=500, description="Conductividad saturada (mm/h); vacío = la de la textura")
+    suction_mm: float | None = Field(None, gt=0, le=2000, description="Succión en el frente de humedecimiento (mm)")
+    porosity: float | None = Field(None, gt=0.05, le=0.7, description="Porosidad efectiva")
+    initial_saturation: float | None = Field(None, ge=0, le=1, description="Saturación inicial del suelo (0 seco – 1 saturado)")
+    water_table_m: float | None = Field(None, gt=0, le=50, description="Profundidad de la napa (m); vacío = sin límite")
+    evaporation_mm_day: float | None = Field(None, ge=0, le=20, description="Evaporación del agua encharcada (mm/día)")
+
+
+class Inflow(BaseModel):
+    name: str | None = None
+    section: list[tuple[float, float]] = Field(..., min_length=2, description="Sección de entrada [[lon, lat], [lon, lat]] a través del cauce o del valle")
+    hydrograph: list[tuple[float, float]] = Field(..., min_length=2, description="[[t (h), Q (m³/s)], ...]")
+    cv: float | None = Field(None, ge=0, le=0.5, description="Concentración de sedimento del agua que entra")
+
+
+class RoadItem(BaseModel):
+    id: int | str | None = None
+    cls: str
+    name: str | None = None
+    bridge: bool = False
+    line: list[tuple[float, float]] = Field(..., min_length=2)
+
+
+class Culvert(BaseModel):
+    point: tuple[float, float]
+    diameter_m: float = Field(1.0, gt=0.1, le=10)
+    count: int = Field(1, ge=1, le=50)
+    name: str | None = None
+
+
+class Roads(BaseModel):
+    items: list[RoadItem] | None = None
+    classes: dict[str, dict] | None = Field(None, description="Por categoría: embankment_m, width_m, include")
+    culverts: list[Culvert] | None = None
+
+
+class LanduseZone(BaseModel):
+    name: str | None = None
+    cls: str
+    polygon: list[tuple[float, float]] = Field(..., min_length=3)
+
+
+class Landuse(BaseModel):
+    worldcover: bool = Field(False, description="Usar ESA WorldCover 10 m donde no hay polígonos")
+    polygons: list[LanduseZone] | None = None
+    classes: dict[str, dict] | None = Field(None, description="Por clase: cn, manning, ks_factor")
 
 
 class Outlet(BaseModel):
@@ -250,7 +307,7 @@ class SimRequest(BaseModel):
     # numérica
     dx: float = Field(25.0, ge=1, le=500)
     ppc: int = Field(3, ge=1, le=5)
-    duration_s: float = Field(120.0, gt=1, le=172800, description="Tiempo simulado (s); MPM y partículas hasta 10800")
+    duration_s: float = Field(120.0, gt=1, le=864000, description="Tiempo simulado (s); MPM y partículas hasta 10800, inundación hasta 10 días")
     max_frames: int = Field(180, ge=10, le=400)
     display_particles: int = Field(30000, ge=500, le=200000)
     max_particles: int = Field(600000, ge=1000, le=5000000)
@@ -282,6 +339,10 @@ class SimRequest(BaseModel):
     debris: Debris | None = None
     flood: FloodOptions | None = None
     basins: BasinOptions | None = None
+    infiltration: Infiltration | None = None
+    inflows: list[Inflow] | None = None
+    roads: Roads | None = None
+    landuse: Landuse | None = None
     # solo motor de partículas
     damping: float = Field(0.985, ge=0.8, le=1.0)
     dt: float = Field(0.35, gt=0.05, le=2.0)
@@ -402,7 +463,65 @@ def health():
 
 @app.get("/api/datasets")
 def datasets():
-    return {"datasets": ["SYNTHETIC", dem.TERRAIN_TILES] + dem.SUPPORTED, "opentopography_key_configured": bool(dem.api_key())}
+    return {"datasets": ["SYNTHETIC", dem.TERRAIN_TILES] + dem.SUPPORTED, "opentopography_key_configured": bool(dem.api_key()),
+            "local": localdem.list_all()}
+
+
+# ───────────────────────────── DEM propios (MDE-Ar, LiDAR LAS/LAZ, GeoTIFF)
+@app.post("/api/dem/upload")
+def dem_upload(file: UploadFile = File(...), epsg: int | None = Form(None), res_m: float | None = Form(None),
+               ground_only: bool = Form(True), name: str | None = Form(None)):
+    """Carga un DEM propio: raster (GeoTIFF, IMG, ASC…) o nube LiDAR (LAS/LAZ, se rasteriza el terreno).
+    Queda disponible como dataset «LOCAL:<id>»."""
+    if res_m is not None and not 0.25 <= res_m <= 100:
+        raise HTTPException(400, "res_m: entre 0,25 y 100 m")
+    fname = Path(file.filename or "dem.tif").name
+    tmp_dir = localdem.LOCAL_DIR / "upload"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_dir / f"{uuid.uuid4().hex[:8]}{Path(fname).suffix.lower()}"
+    try:
+        with tmp.open("wb") as f:
+            shutil.copyfileobj(file.file, f, length=8 << 20)
+        return localdem.ingest(tmp, fname, epsg=epsg, res_m=res_m, ground_only=ground_only, name=name)
+    except localdem.LocalDemError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+@app.get("/api/dem/local")
+def dem_local_list():
+    return {"dems": localdem.list_all()}
+
+
+@app.delete("/api/dem/local/{did}")
+def dem_local_delete(did: str):
+    try:
+        localdem.delete(did)
+    except localdem.LocalDemError as e:
+        raise HTTPException(404, str(e))
+    return {"ok": True}
+
+
+# ───────────────────────────── Llanura: caminos de OSM y tablas por defecto
+@app.post("/api/roads/osm")
+def roads_osm(b: BBox):
+    """Caminos, vías férreas, puentes y alcantarillas de OpenStreetMap dentro del bbox."""
+    from . import roads
+    if (b.east - b.west) > 1.0 or (b.north - b.south) > 1.0:
+        raise HTTPException(400, "Zona demasiado grande (máx. 1° por lado)")
+    try:
+        return roads.fetch_osm(b.west, b.south, b.east, b.north)
+    except roads.RoadsError as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/plain/defaults")
+def plain_defaults():
+    """Tablas para el panel de llanura: texturas de suelo, clases de uso del suelo y de caminos."""
+    from . import flood, landcover, roads
+    return {"textures": flood.SOIL_TEXTURES, "landuse": landcover.CLASSES, "roads": roads.CLASSES,
+            "road_thresholds": [dict(depth_m=t, key=k, name=n) for t, k, n in roads.THRESHOLDS]}
 
 
 @app.get("/api/capabilities")
@@ -453,17 +572,17 @@ def save_example(req: ExampleSave):
     base = unicodedata.normalize("NFKD", str(ex.get("id") or ex["title"])).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-z0-9]+", "_", base.lower()).strip("_")[:60].strip("_") or uuid.uuid4().hex[:8]
     index_path = EXAMPLES / "index.json"
-    index = json.loads(index_path.read_text()) if index_path.exists() else []
+    index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else []
     entry = next((e for e in index if e["id"] == slug), None)
     if entry and not entry.get("custom"):
         raise HTTPException(409, "Ese identificador pertenece a un ejemplo original: usá otro nombre")
     ex["id"] = slug
-    (EXAMPLES / f"{slug}.json").write_text(json.dumps(ex, ensure_ascii=False, separators=(",", ":")))
+    (EXAMPLES / f"{slug}.json").write_text(json.dumps(ex, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     if entry:
         entry["title"] = ex["title"]
     else:
         index.append({"id": slug, "title": ex["title"], "file": f"{slug}.json", "custom": True})
-    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=1))
+    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"id": slug, "file": f"{slug}.json"}
 
 
@@ -524,7 +643,7 @@ def basins(req: SimRequest, storm: bool = True):
     p["bbox"] = b.model_dump()
     dx, _ = flood.flood_dx(p)
     key = json.dumps([req.dataset, p["bbox"], dx, p.get("flood"), p.get("lakes"), p.get("burn_channels"), p.get("dams"),
-                      p.get("breach")], sort_keys=True, default=str)
+                      p.get("breach"), p.get("roads")], sort_keys=True, default=str)
     try:
         if key not in _terrain_cache:
             _terrain_cache.clear()

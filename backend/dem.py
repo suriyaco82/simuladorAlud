@@ -1,4 +1,4 @@
-"""DEM: descarga (OpenTopography o AWS Terrain Tiles), caché, DEM sintético, muestreo bilineal y marco métrico local."""
+"""DEM: descarga (OpenTopography o AWS Terrain Tiles), DEM propios (localdem.py), caché, DEM sintético, muestreo bilineal y marco métrico local."""
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +16,8 @@ from rasterio.errors import NotGeoreferencedWarning
 from rasterio.io import MemoryFile
 from rasterio.transform import from_bounds
 
+from . import localdem
+
 OT_URL = "https://portal.opentopography.org/API/globaldem"
 SUPPORTED = ["COP30", "ANADEM", "NASADEM", "AW3D30", "SRTMGL1"]
 ALIASES = {"SRTM_GL1": "SRTMGL1"}  # nombre usado en v0.1 (inválido para la API)
@@ -28,7 +30,7 @@ def _load_env(path=Path(__file__).resolve().parent / ".env"):
     """Variables de backend/.env (KEY=valor). No pisa las que ya vienen del entorno (p. ej. las de Render)."""
     if not path.exists():
         return
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -197,6 +199,8 @@ def load_dem(dataset, bbox, max_dim=640, fallback=True, progress=None):
     w, s, e, n = bbox["west"], bbox["south"], bbox["east"], bbox["north"]
     dataset = ALIASES.get(dataset, dataset)
     info = dict(source=dataset, cached=False, warning=None)
+    if dataset.startswith(localdem.PREFIX):
+        return _load_local(dataset, bbox, max_dim, fallback, progress)
     if dataset == "SYNTHETIC":
         arr, tr = synthetic_dem(w, s, e, n)
         return arr, tr, info
@@ -230,6 +234,48 @@ def load_dem(dataset, bbox, max_dim=640, fallback=True, progress=None):
         raise DemError("DEM sin valores válidos")
     fill = float(np.nanmedian(arr))
     return np.nan_to_num(arr, nan=fill), tr, info
+
+
+def _load_local(dataset, bbox, max_dim, fallback, progress):
+    """DEM propio (MDE-Ar, LiDAR…). Lo que queda fuera de su cobertura se completa con AWS Terrain Tiles, corrido por
+    el desnivel medio entre ambos en la franja común (datum vertical distinto o sesgo del DEM global)."""
+    try:
+        did = localdem.parse_id(dataset)
+        m = localdem.meta(did)
+    except localdem.LocalDemError as err:
+        raise DemError(str(err))
+    if progress:
+        progress(f"Leyendo el DEM propio «{m['name']}»…")
+    arr, tr, cov = localdem.read_bbox(did, bbox, max_dim)
+    info = dict(source=f"Propio: {m['name']} ({m['res_m']:g} m)", cached=True, warning=None, local=True,
+                coverage=round(cov, 3))
+    if cov <= 0:
+        raise DemError(f"La zona de cálculo está fuera del DEM propio «{m['name']}»: usá «Ajustar zona al DEM»")
+    hole = ~np.isfinite(arr)
+    if hole.any():
+        pct = hole.mean() * 100
+        if fallback:
+            if progress:
+                progress("Completando fuera del DEM propio con AWS Terrain Tiles…")
+            try:
+                g_arr, g_tr, z = load_terrain_tiles(bbox["west"], bbox["south"], bbox["east"], bbox["north"])
+                H, W = arr.shape
+                cols, rows = np.meshgrid(np.arange(W) + 0.5, np.arange(H) + 0.5)
+                lon, lat = tr * (cols, rows)
+                glob = sample_dem(g_arr, g_tr, lon, lat).astype(np.float32)
+                both = ~hole & np.isfinite(glob)
+                shift = float(np.median(arr[both] - glob[both])) if both.sum() > 20 else 0.0
+                arr = np.where(hole, glob + shift, arr)
+                info["warning"] = (f"El {pct:.0f} % de la zona queda fuera del DEM propio: se completó con AWS Terrain Tiles "
+                                   f"(~30 m), corrido {shift:+.1f} m para empalmar las cotas.")
+            except DemError:
+                hole = ~np.isfinite(arr)
+        if not np.isfinite(arr).all():
+            fill = float(np.nanmedian(arr))
+            arr = np.nan_to_num(arr, nan=fill)
+            info["warning"] = (f"El {pct:.0f} % de la zona queda fuera del DEM propio y se rellenó con una cota constante "
+                               f"({fill:.0f} m): achicá la zona al DEM o activá el DEM alternativo.")
+    return arr.astype(np.float32), tr, info
 
 
 def sample_dem(arr, transform, lon, lat):
