@@ -20,6 +20,7 @@ Modelo (todo sobre la grilla de columnas del escenario, celdas de lado dx):
 from __future__ import annotations
 
 import math
+import os
 import time
 
 import numpy as np
@@ -79,7 +80,7 @@ def flood_dx(p):
     fl = {k: v for k, v in (p.get("flood") or {}).items() if v is not None}
     dx = float(p["dx"])
     fr = dem.LocalFrame(p["bbox"])
-    budget = int(fl.get("max_cells", 450_000))
+    budget = int(fl.get("max_cells") or os.environ.get("SIMULADOR_FLOOD_CELLS") or 450_000)
     cells = (fr.Lx / dx + 1) * (fr.Ly / dx + 1)
     if cells <= budget:
         return dx, None

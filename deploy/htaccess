@@ -1,0 +1,31 @@
+# Simulador · simulador.suriyaco.ar
+# El servidor elige el modo solo:
+#  - con Passenger (mod_passenger cargado): la aplicación Python (passenger_wsgi.py) atiende todo;
+#  - sin Passenger: Apache entrega el frontend y la API corre como CGI (api.cgi).
+
+<IfModule mod_passenger.c>
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION BEGIN
+PassengerAppRoot "/home/suriyaco/public_html/simulador.suriyaco.ar"
+PassengerBaseURI "/"
+PassengerPython "/home/suriyaco/virtualenv/public_html/simulador.suriyaco.ar/3.11/bin/python"
+PassengerAppLogFile "/home/suriyaco/public_html/simulador.suriyaco.ar/passenger.log"
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION END
+</IfModule>
+
+<IfModule !mod_passenger.c>
+Options +ExecCGI -Indexes
+AddHandler cgi-script .cgi
+DirectoryIndex disabled
+RewriteEngine On
+# la API va al CGI
+RewriteRule ^api(/.*)?$ api.cgi [END]
+# la página y los archivos del frontend (están en frontend/)
+RewriteRule ^$ frontend/index.html [END]
+RewriteCond %{DOCUMENT_ROOT}/frontend%{REQUEST_URI} -f
+RewriteRule ^(.*)$ frontend/$1 [END]
+</IfModule>
+
+# no exponer el código, la caché, las claves ni los logs (en los dos modos)
+RedirectMatch 404 ^/(backend|cache|docs|tmp|public|deploy|scripts|__pycache__)(/.*)?$
+RedirectMatch 404 ^/[^/]+\.(py|md|txt|zip|log)$
+RedirectMatch 404 (^|/)\.env$

@@ -26,8 +26,15 @@ import taichi as ti
 
 
 def init_taichi(device: str) -> str:
+    import os
     arch = {"cpu": ti.cpu, "gpu": ti.gpu}.get(device, ti.gpu)
-    ti.init(arch=arch, default_fp=ti.f32, log_level=ti.WARN, offline_cache=True, random_seed=0)
+    kw = {}
+    # hosting compartido (ver api.cgi): sin GPU y con pocos hilos, para no superar el límite de memoria virtual
+    if os.environ.get("SIMULADOR_FORCE_CPU") == "1":
+        arch = ti.cpu
+    if os.environ.get("SIMULADOR_THREADS"):
+        kw["cpu_max_num_threads"] = max(1, int(os.environ["SIMULADOR_THREADS"]))
+    ti.init(arch=arch, default_fp=ti.f32, log_level=ti.WARN, offline_cache=True, random_seed=0, **kw)
     return ti.lang.impl.current_cfg().arch.name
 
 

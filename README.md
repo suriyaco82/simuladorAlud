@@ -169,6 +169,10 @@ Hecho en v0.2: área de rotura, volumen y espesor variables, erosión y deposici
 - **Informe.** Documento completo con portada, resumen ejecutivo, parámetros, mapas sobre imagen satelital (intensidad y zonas, profundidad, velocidad, presión, arribo, erosión/depósito o Cv), vista 3D, zonas con acercamientos, gráficos, listado de edificios, hidrogramas y metodología. Se imprime o guarda como PDF, o se descarga como HTML.
 - **Comparación.** Con dos o más análisis marcados: indicadores lado a lado (el más y el menos desfavorable resaltados), gráficos, mapas con la misma extensión, envolvente de intensidad, coincidencia entre escenarios, edificios afectados en cada uno y los parámetros que cambian.
 
+## Despliegue en cPanel
+
+Ver [DEPLOY_CPANEL.md](DEPLOY_CPANEL.md): `passenger_wsgi.py`, `requirements-cpanel.txt` y `scripts/build_cpanel.sh`, que arma el zip para subir.
+
 ## Despliegue en Render.com
 
 El repo incluye `render.yaml` (Blueprint): un único Web Service que sirve la API y el frontend desde el mismo origen.

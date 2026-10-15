@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 import time
 import traceback
 from pathlib import Path
@@ -9,6 +10,13 @@ from pathlib import Path
 import numpy as np
 
 NODE_BUDGET = {"gpu": 24_000_000, "auto": 24_000_000, "cpu": 10_000_000}
+
+
+def _env_int(name):
+    try:
+        return int(float(os.environ[name]))
+    except (KeyError, ValueError):
+        return None
 
 
 def run_job(job_dir: str, p: dict, q):
@@ -35,6 +43,12 @@ def run_job(job_dir: str, p: dict, q):
         warnings = [dem_info["warning"]] if dem_info["warning"] else []
         if p["engine"] == "mpm":
             budget = NODE_BUDGET.get(p["device"], NODE_BUDGET["cpu"])
+            # hosting compartido: memoria limitada (SIMULADOR_MPM_NODES y SIMULADOR_MAX_PARTICLES, ver api.cgi)
+            if _env_int("SIMULADOR_MPM_NODES"):
+                budget = min(budget, _env_int("SIMULADOR_MPM_NODES"))
+            if _env_int("SIMULADOR_MAX_PARTICLES") and p["max_particles"] > _env_int("SIMULADOR_MAX_PARTICLES"):
+                p["max_particles"] = _env_int("SIMULADOR_MAX_PARTICLES")
+                warnings.append(f"Partículas limitadas a {p['max_particles']:,} por la memoria del servidor".replace(",", "."))
             for _ in range(6):
                 g = scenario.build_grid(arr, transform, p["bbox"], dx)
                 nz = scenario.estimate_nz(g["H_pre"], dx, p["erodible_depth_m"] + 2 * p["release_thickness_m"], 10 * dx)
@@ -44,7 +58,7 @@ def run_job(job_dir: str, p: dict, q):
                 dx *= (nodes / budget) ** (1 / 3) * 1.02
             if dx > p["dx"] * 1.01:
                 warnings.append(f"dx aumentado de {p['dx']:.1f} a {dx:.1f} m para respetar el presupuesto de "
-                                f"memoria ({budget/1e6:.0f} M nodos). Reducí la zona de cálculo para más detalle.")
+                                f"memoria ({budget/1e6:.1f} M nodos). Reducí la zona de cálculo para más detalle.")
         g = scenario.build_grid(arr, transform, p["bbox"], dx)
         notes = scenario.condition_terrain(g, p)
 

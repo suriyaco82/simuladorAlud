@@ -12,6 +12,7 @@ import {RAMPS, hexRGB} from './palette.js';
 import {ImpactZones} from './zones.js';
 import {LibraryPanel, loadAnalysis} from './library.js';
 import {buildReport, buildComparison, DocViewer} from './report.js';
+import {methodsHTML} from './methods.js';
 import {Wizard} from './wizard.js';
 
 // Servido por el backend (Render, uvicorn): mismo origen. Servidor estático aparte (dev en :8080): backend local.
@@ -885,6 +886,7 @@ const library = new LibraryPanel({api: API, status, toast: (...a) => toast(...a)
 library.onRenamed = e => { const h = $('anaHead'); if (h && result && result.id === e.id) { h.outerHTML = analysisHeader(); bindAnalysisHeader(); } };
 library.refresh();
 const docs = new DocViewer(document.querySelector('main > section'));
+$('methodsBtn').onclick = () => docs.show('Métodos de cálculo', 'Metodos de calculo Suriyaco MassFlow 3D', () => methodsHTML(API));
 
 function analysisHeader() {
   const e = library.entry(result.id);

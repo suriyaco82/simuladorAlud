@@ -1,0 +1,18 @@
+# Dependencias para cPanel (Setup Python App, Python 3.11 o 3.12).
+# Versiones con rango: los servidores CloudLinux suelen tener una glibc vieja y pip tiene que poder elegir la
+# versión que ya viene compilada para ellos (--prefer-binary), en lugar de intentar compilarla.
+--prefer-binary
+fastapi>=0.110,<0.117
+a2wsgi>=1.10
+pydantic>=2.6,<2.12
+python-multipart>=0.0.9
+requests>=2.31
+numpy>=1.26,<2.3
+scipy>=1.11
+rasterio>=1.3.9
+pyproj>=3.6
+laspy[lazrs]>=2.5
+# edificios de GlobalBuildingAtlas (pyarrow 21+ ya no trae versión compilada para glibc 2.17)
+pyarrow>=14,<21
+# motor MPM 3D en CPU (taichi 1.7.2 no trae versión para glibc 2.17; 1.7.1 sí)
+taichi>=1.7,<1.8

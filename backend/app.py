@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 from importlib import metadata
 import queue
 import shutil
@@ -433,6 +434,12 @@ class JobManager:
                 shutil.rmtree(j["dir"], ignore_errors=True)
             self.jobs.pop(j["id"], None)
 
+    def get(self, jid):
+        return self.jobs.get(jid)
+
+    def forget(self, jid):
+        self.jobs.pop(jid, None)
+
     def public(self, jid):
         j = self.jobs.get(jid)
         if not j:
@@ -446,14 +453,28 @@ class JobManager:
         return out
 
 
-jobs: JobManager | None = None
+class _LazyJobs:
+    """Administrador de simulaciones, creado en el primer uso (con Passenger/WSGI no hay evento de arranque).
+
+    SIMULADOR_JOBS=detached (cPanel): cada simulación en un proceso propio con el estado en disco (runner.py).
+    Si no, en procesos hijos de este servidor con el estado en memoria (uvicorn, Render, uso local)."""
+    _m = None
+    _lock = threading.Lock()
+
+    def __getattr__(self, name):
+        if self._m is None:
+            with self._lock:
+                if self._m is None:
+                    library.import_legacy(JOBS)
+                    if os.environ.get("SIMULADOR_JOBS") == "detached":
+                        from .runner import DetachedJobManager
+                        type(self)._m = DetachedJobManager(library)
+                    else:
+                        type(self)._m = JobManager()
+        return getattr(self._m, name)
 
 
-@app.on_event("startup")
-def _startup():
-    global jobs
-    library.import_legacy(JOBS)
-    jobs = JobManager()
+jobs = _LazyJobs()
 
 
 @app.get("/api/health")
@@ -687,18 +708,21 @@ def job_status(jid: str):
 def job_cancel(jid: str):
     if not jobs.cancel(jid):
         raise HTTPException(404, "Job inexistente")
-    return jobs.public(jid)
+    try:
+        return jobs.public(jid)
+    except HTTPException:  # modo desacoplado: la carpeta del job cancelado ya se borró
+        return {"id": jid, "status": "cancelled", "stage": "Cancelada", "error": None, "progress": {}}
 
 
 def _job_file(jid, name):
-    j = jobs.jobs.get(jid)
-    if not j:
+    j = jobs.get(jid)
+    if not j or library.exists(jid):
         if library.exists(jid):  # job de una sesión anterior del servidor: está en la biblioteca
             return library.dir(jid) / name
         raise HTTPException(404, "Job inexistente")
     if j["status"] != "done":
         raise HTTPException(409, f"Job en estado {j['status']}")
-    return Path(j["dir"]) / name
+    return Path(j.get("dir") or library.root / jid) / name
 
 
 @app.get("/api/jobs/{jid}/result")
@@ -742,12 +766,12 @@ def library_patch(aid: str, req: LibraryPatch):
 
 @app.delete("/api/library/{aid}")
 def library_delete(aid: str):
-    j = jobs.jobs.get(aid)
+    j = jobs.get(aid)
     if j and j["status"] in ("queued", "running"):
         raise HTTPException(409, "El análisis todavía se está calculando")
     library.delete(_lib(aid))
     if j:
-        jobs.jobs.pop(aid, None)
+        jobs.forget(aid)
     return {"ok": True}
 
 

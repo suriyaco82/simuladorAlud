@@ -430,7 +430,7 @@ const fig = (src, caption, n) => `<figure><img src="${src}" alt=""><figcaption><
 const kv = rows => `<table class="kv"><tbody>${rows.filter(Boolean).map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</tbody></table>`;
 const kpi = (value, label, cls = '') => `<div class="kpi ${cls}"><b>${value}</b><span>${label}</span></div>`;
 
-function shell(title, body, meta) {
+export function shell(title, body, meta) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>${esc(title)}</title><style>${CSS}</style></head><body>` +
     `<div class="tb" id="tb" hidden><button onclick="print()">Imprimir / guardar PDF</button></div>` +

@@ -147,7 +147,8 @@ def fetch_gba(west, south, east, north):
     try:
         import pyarrow  # noqa: F401
     except ImportError as e:
-        raise BuildingsError("Falta pyarrow: pip install -r backend/requirements.txt") from e
+        raise BuildingsError("Los edificios de GlobalBuildingAtlas necesitan pyarrow, que no está instalado en este servidor "
+                             "(pip install pyarrow). El resto del simulador funciona igual.") from e
 
     out = []
     for tile in _tiles(west, south, east, north):
