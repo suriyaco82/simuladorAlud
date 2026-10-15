@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Biblioteca de análisis: proyectos con nombre, análisis guardados para reabrir sin recalcular,
 // selección de varios para compararlos e informes.
 import {ic} from './icons.js';

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Vista realista: terreno con imagen satelital, superficie del flujo reconstruida desde las partículas,
 // clastos 3D que ruedan (instancing) y polvo en frentes rápidos. El aspecto depende del material.
 import * as THREE from 'three';

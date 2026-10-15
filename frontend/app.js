@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {initHelp, initPresets, invalidFields} from './help.js';
@@ -14,6 +16,9 @@ import {LibraryPanel, loadAnalysis} from './library.js';
 import {buildReport, buildComparison, DocViewer} from './report.js';
 import {methodsHTML} from './methods.js';
 import {Wizard} from './wizard.js';
+
+console.info('%cSuriyaco MassFlow 3D%c · desarrollado por Alfredo Toledo · SuriyacoValley · La Rioja, Argentina',
+  'font-weight:bold;color:#007ac2', '');
 
 // Servido por el backend (Render, uvicorn): mismo origen. Servidor estático aparte (dev en :8080): backend local.
 const API = location.port === '8080' || location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';

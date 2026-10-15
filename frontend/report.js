@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Informes profesionales (un análisis) y comparaciones entre varios escenarios.
 // Todo se arma en el navegador: mapas sobre imágenes satelitales (teselas Esri, con CORS), gráficos SVG y tablas.
 // El documento es HTML autocontenido (imágenes embebidas): se ve en el visor, se imprime a PDF o se descarga.
@@ -434,7 +436,7 @@ export function shell(title, body, meta) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>${esc(title)}</title><style>${CSS}</style></head><body>` +
     `<div class="tb" id="tb" hidden><button onclick="print()">Imprimir / guardar PDF</button></div>` +
-    `<div class="doc">${body}<footer><span>${esc(meta)}</span><span>Suriyaco MassFlow 3D · generado el ${new Date().toLocaleString('es-AR')}</span></footer></div>` +
+    `<div class="doc">${body}<footer><span>${esc(meta)}</span><span>Suriyaco MassFlow 3D · Alfredo Toledo · SuriyacoValley · La Rioja, Argentina · AGPL-3.0 · generado el ${new Date().toLocaleString('es-AR')}</span></footer></div>` +
     `<script>if(window.top===window)document.getElementById('tb').hidden=false</script></body></html>`;
 }
 

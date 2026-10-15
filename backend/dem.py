@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """DEM: descarga (OpenTopography o AWS Terrain Tiles), DEM propios (localdem.py), caché, DEM sintético, muestreo bilineal y marco métrico local."""
 from __future__ import annotations
 

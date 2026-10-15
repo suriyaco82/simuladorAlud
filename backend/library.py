@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Biblioteca de análisis: cada simulación terminada queda guardada con nombre y proyecto, para volver a abrirla
 sin recalcular y para compararla con otras.
 

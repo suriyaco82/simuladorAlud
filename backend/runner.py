@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Simulaciones desacopladas del servidor web, para hosting con Passenger (cPanel).
 
 Passenger puede levantar varios procesos de la aplicación y cerrarlos cuando están inactivos, así que el estado de

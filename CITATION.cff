@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "Si usás este software, citalo así."
+title: "Suriyaco MassFlow 3D: simulador de movimientos de masa e inundaciones sobre DEM"
+version: "0.2.0"
+date-released: "2026-10-15"
+authors:
+  - family-names: "Toledo"
+    given-names: "Alfredo"
+    affiliation: "SuriyacoValley, La Rioja, Argentina"
+license: AGPL-3.0-or-later
+repository-code: "https://github.com/suriyaco82/simuladorAlud"
+url: "https://simulador.suriyaco.ar"
+keywords:
+  - "movimientos de masa"
+  - "MPM"
+  - "inundaciones"
+  - "GLOF"
+  - "La Rioja"
+  - "Argentina"

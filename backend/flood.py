@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Inundación por lluvia en cuencas (2D, aguas someras) con flujos de barro y detritos, bloques de roca y árboles.
 
 Modelo (todo sobre la grilla de columnas del escenario, celdas de lado dx):

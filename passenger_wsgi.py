@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Entrada para cPanel «Setup Python App» (Phusion Passenger / LiteSpeed, WSGI).
 
 FastAPI es ASGI: a2wsgi lo adapta a WSGI. Las simulaciones corren desacopladas del proceso web (backend/runner.py),

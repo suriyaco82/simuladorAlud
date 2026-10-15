@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Ayuda contextual (ícono "i") y preajustes de material.
 // Cada entrada: t título, d descripción, r rango válido (coincide con el backend), v valores típicos,
 // e efecto al cambiarlo; min/max se aplican al campo para marcarlo en rojo si queda fuera de rango.

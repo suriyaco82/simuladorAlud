@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Documento «Métodos de cálculo»: qué calcula cada motor y con qué ecuaciones. Las tablas de parámetros (uso del
 // suelo, texturas, caminos) se leen del backend (/api/plain/defaults) para que coincidan con lo que se simula.
 import {shell} from './report.js';
@@ -28,6 +30,7 @@ export async function methodsHTML(api) {
   const body = `
 <h1>Métodos de cálculo</h1>
 <p style="font-size:12.5pt;color:#0b2e4a;margin-top:0">Suriyaco MassFlow 3D · qué calcula cada motor y con qué ecuaciones</p>
+<p class="note" style="margin-top:-4px">Desarrollado por <b>Alfredo Toledo</b> · SuriyacoValley · La Rioja, Argentina · software libre bajo licencia GNU AGPL-3.0 · código fuente: https://github.com/suriyaco82/simuladorAlud</p>
 <div class="callout">El simulador está <b>verificado</b> contra soluciones analíticas simples, pero <b>no está calibrado</b> contra eventos reales. Sirve para explorar escenarios; no debe usarse para alertas, evacuaciones, diseño de obra ni zonificación oficial.</div>
 
 <h2>1. Terreno y datos de base</h2>

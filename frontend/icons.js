@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Íconos Calcite UI (Esri). Se cargan desde la CDN oficial del paquete @esri/calcite-ui-icons
 // (licencia Esri MLA: redistribución solo sin modificar), y se pintan con currentColor vía CSS mask.
 export const ICON_CDN = 'https://cdn.jsdelivr.net/npm/@esri/calcite-ui-icons@4.5.0/icons/';

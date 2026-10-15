@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Construcción del escenario: grilla de columnas, masa de desprendimiento, lecho erosionable y salida binaria.
 
 Convención de arreglos 2D: shape (ny, nx), índice [j, i]; el nodo (i, j) está en x = i*dx, y = j*dx

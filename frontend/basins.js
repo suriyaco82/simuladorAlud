@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Cuencas y tormenta (motor de inundación por lluvia): parámetros, delineación de cuencas y subcuencas sobre el DEM,
 // red de drenaje e hidrología SCS de cada cuenca (backend: hydro.py, endpoint /api/basins).
 import {ic} from './icons.js';

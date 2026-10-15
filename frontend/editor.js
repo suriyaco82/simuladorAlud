@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Editor de escenarios: trae todos los datos de un ejemplo (parámetros, elementos en cascada y edificios),
 // muestra cuáles faltan y permite cargar datos de campo, completar edificios con GlobalBuildingAtlas y guardar.
 import {HELP} from './help.js';

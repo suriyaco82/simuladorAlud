@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Zonas de afectación en el mapa: polígonos por intensidad, con el detalle de la zona y de sus edificios al tocarlas.
 import {DAMAGE_COLORS, DAMAGE_NAMES, LEVEL_COLORS, CRITICALITY_COLORS} from './palette.js';
 import {buildingImpact, buildingHeight, damageChip} from './exposure.js';

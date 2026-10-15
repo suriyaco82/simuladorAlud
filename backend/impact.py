@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Zonas de afectación (polígonos por intensidad) y grado de daño de cada edificio.
 
 Trabaja solo con el dominio y los campos del resultado (no necesita el DEM ni la grilla del solver), así que sirve

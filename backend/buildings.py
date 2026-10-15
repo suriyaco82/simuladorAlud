@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Edificios de GlobalBuildingAtlas (GBA LoD1, Zhu et al. 2025): huellas y alturas para una zona.
 
 Se lee la versión GeoParquet publicada en Source Cooperative (teselas de 5° × 5°, ordenadas espacialmente).

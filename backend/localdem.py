@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """DEM propios: rasters (GeoTIFF, IMG, ASC… p. ej. MDE-Ar del IGN) y nubes de puntos LiDAR (LAS/LAZ).
 
 Cada archivo se convierte una sola vez a un GeoTIFF en lon/lat (EPSG:4326) dentro de cache/dem_local/<id>.tif, con

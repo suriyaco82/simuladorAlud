@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Diagnóstico de la instalación en cPanel, para hostings sin acceso por consola.
 
 Correr desde Setup Python App → «Execute python script» con: diagnostico_cpanel.py

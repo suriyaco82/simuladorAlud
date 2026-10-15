@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -33,7 +35,10 @@ EXAMPLES = ROOT / "frontend" / "examples"
 JOBS = CACHE / "jobs"  # versiones anteriores: se importan a la biblioteca al iniciar
 library = Library(CACHE / "library")
 
-app = FastAPI(title="Suriyaco MassFlow 3D", version="0.2.0")
+AUTHOR = "Alfredo Toledo · SuriyacoValley · La Rioja, Argentina"
+app = FastAPI(title="Suriyaco MassFlow 3D", version="0.2.0", description=f"Simulador de movimientos de masa e inundaciones. Desarrollado por {AUTHOR}.",
+              contact={"name": AUTHOR, "url": "https://github.com/suriyaco82/simuladorAlud"},
+              license_info={"name": "AGPL-3.0-or-later", "url": "https://www.gnu.org/licenses/agpl-3.0.html"})
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=4096)
 
@@ -479,7 +484,8 @@ jobs = _LazyJobs()
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "Suriyaco MassFlow 3D", "version": app.version}
+    return {"ok": True, "service": "Suriyaco MassFlow 3D", "version": app.version, "author": AUTHOR,
+            "license": "AGPL-3.0-or-later", "source": "https://github.com/suriyaco82/simuladorAlud"}
 
 
 @app.get("/api/datasets")

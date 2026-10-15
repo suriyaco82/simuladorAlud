@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Uso del suelo para el motor de inundación: CN, rugosidad de Manning y factor de infiltración por celda.
 
 Fuentes, de menor a mayor prioridad:

@@ -1,5 +1,7 @@
 # Suriyaco MassFlow 3D — v0.2
 
+*Desarrollado por Alfredo Toledo · SuriyacoValley · La Rioja, Argentina*
+
 Prototipo para simular movimientos de masa sobre un DEM. Incluye:
 
 - **Zona de cálculo dibujada en el mapa**: se arrastra un rectángulo o se toma la vista actual. También se pueden editar las coordenadas.
@@ -57,6 +59,28 @@ Prototipo para simular movimientos de masa sobre un DEM. Incluye:
 - **Planilla de campo de edificios (CSV)**: exportar, completar en campo (altura, pisos, uso, estructura, notas) y volver a importar. Cada fila se asocia por `id` o al edificio más cercano (≤ 15 m), o se agrega como nuevo. La altura de campo tiene prioridad sobre GBA. Con alturas conocidas, el impacto informa cuántos edificios tienen un flujo más profundo que la mitad o que toda su altura.
 
 Detalles del modelo y verificación: [docs/MODEL.md](docs/MODEL.md).
+
+## Autoría
+
+**Suriyaco MassFlow 3D** fue desarrollado por **Alfredo Toledo** · SuriyacoValley · La Rioja, Argentina.
+
+Copyright (c) 2026 Alfredo Toledo. Para citarlo, usá [CITATION.cff](CITATION.cff) o el botón «Cite this
+repository» de GitHub.
+
+## Licencia
+
+Software libre bajo la **GNU Affero General Public License v3.0 o posterior** ([LICENSE](LICENSE)), con términos
+adicionales de atribución según su sección 7 ([NOTICE](NOTICE)). En resumen:
+
+- Podés usarlo, estudiarlo, modificarlo y redistribuirlo.
+- Si ofrecés una versión modificada a otros, también por Internet, tenés que publicar su código fuente bajo la misma
+  licencia.
+- Toda copia, versión modificada o instalación pública tiene que conservar el aviso de copyright, el archivo NOTICE,
+  la atribución visible en la interfaz («por Alfredo Toledo · SuriyacoValley · La Rioja, Argentina») y el enlace al
+  código fuente.
+- Una versión modificada tiene que indicarse como tal y no puede presentarse como la original.
+
+El resumen no reemplaza el texto de la licencia.
 
 ## Importante
 

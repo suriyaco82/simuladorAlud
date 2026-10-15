@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Solver MLS-MPM 3D (Taichi) para flujos granulares saturados sobre DEM. CPU o GPU (Metal/CUDA/Vulkan).
 
 Física (mezcla monofásica sólido-agua):

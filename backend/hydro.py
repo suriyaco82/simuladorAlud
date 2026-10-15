@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Cuencas y subcuencas sobre el DEM, hidrología de tormenta y propensión a flujos de detritos.
 
 Convención de grilla: la de scenario (shape (ny, nx), índice [j, i], x = i·dx, y = j·dx desde la esquina SO).

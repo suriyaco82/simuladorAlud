@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Caminos, vías férreas y alcantarillas para el motor de inundación.
 
 - Descarga de OpenStreetMap (Overpass API) dentro de la zona: rutas por categoría, vías férreas, puentes y

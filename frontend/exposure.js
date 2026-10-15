@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Exposición: zonas urbanas y edificios (mapa + 3D), panel de impacto y ejemplos precargados.
 import * as THREE from 'three';
 import {DAMAGE_COLORS, DAMAGE_NAMES} from './palette.js';

@@ -1,4 +1,6 @@
 #!/home/suriyaco/virtualenv/public_html/simulador.suriyaco.ar/3.11/bin/python
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """API del simulador como CGI, para servidores sin Passenger (el .htaccess elige este modo solo si falta mod_passenger).
 
 Apache entrega el frontend como archivos estáticos y manda /api/... a este script. Cada pedido arranca Python, así

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Verificación del solver MPM contra soluciones analíticas (bloque deslizante sobre plano inclinado).
 
 a = g·(sin θ − tan δ·(1−λ)·cos θ)

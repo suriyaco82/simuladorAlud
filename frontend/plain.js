@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Llanura (motor de inundación): depresiones del terreno, infiltración continua con saturación del suelo, caudales
 // que entran por el borde, caminos con terraplén y alcantarillas (OSM o GeoJSON) y uso del suelo (CN, Manning).
 // Backend: flood.py, roads.py, landcover.py; tablas por defecto en /api/plain/defaults.

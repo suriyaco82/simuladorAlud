@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+# SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 """Motor exploratorio rápido (v0.1): partículas independientes sobre el lecho, Coulomb basal + amortiguamiento.
 
 Sin interacción entre partículas ni reología: sirve para pre-visualizar trayectorias antes de correr MPM.

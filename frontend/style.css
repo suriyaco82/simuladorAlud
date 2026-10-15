@@ -1,3 +1,5 @@
+/* Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina */
+/* SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE) */
 /* Estilo inspirado en Esri Calcite Design System (tema claro de ArcGIS) */
 :root{
   --brand:#007ac2;--brand-h:#00619b;--brand-p:#004874;--brand-l:#e5f1f9;
@@ -22,6 +24,8 @@ header .brand{display:flex;align-items:center;gap:10px;font-size:16px}
 header .logo{display:flex;width:32px;height:32px;align-items:center;justify-content:center;border-radius:50%;background:var(--brand);color:#fff}
 header .logo .ic{width:20px;height:20px;vertical-align:0}
 header b{font-weight:600;letter-spacing:.2px}
+header .author{font-weight:600;color:var(--t2)}
+header .author a{color:var(--brand);font-weight:500}
 header .ver{font-size:12px;color:var(--t3);border-left:1px solid var(--b2);padding-left:10px}
 header small{color:var(--t3);font-size:12px;flex:1}
 header .hdr-btn{width:auto;margin:0;white-space:nowrap}
@@ -482,3 +486,13 @@ button.wz-btn .ic{margin:0}
 #split:focus-visible{outline:none}
 body.splitting{cursor:row-resize;user-select:none}
 body.splitting #map,body.splitting #scene{pointer-events:none}
+/* encabezado en pantallas chicas: el crédito de autoría en su propia línea, siempre visible */
+@media(max-width:800px){
+  header{height:auto;flex-wrap:wrap;padding:8px 12px;gap:4px 10px}
+  header .brand{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:0 8px;flex:1;min-width:0}
+  header .brand .logo{grid-row:span 2}
+  header .brand b{white-space:nowrap}
+  header .ver:not(.author){display:none}
+  header .author{border-left:0;padding-left:0;font-size:11px;line-height:1.3}
+  header .hdr-btn{padding:6px 8px;font-size:12px}
+}

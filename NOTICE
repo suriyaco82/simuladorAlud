@@ -1,0 +1,39 @@
+Suriyaco MassFlow 3D
+Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+https://github.com/suriyaco82/simuladorAlud
+
+Este programa es software libre: podés redistribuirlo y modificarlo según los términos de la Licencia Pública
+General Affero de GNU (GNU AGPL), versión 3 o (a tu elección) cualquier versión posterior, publicada por la Free
+Software Foundation, con los términos adicionales que siguen. Se distribuye con la esperanza de que sea útil, pero
+SIN NINGUNA GARANTÍA, ni siquiera la garantía implícita de COMERCIABILIDAD o APTITUD PARA UN PROPÓSITO PARTICULAR.
+El texto completo de la licencia está en el archivo LICENSE.
+
+
+TÉRMINOS ADICIONALES (sección 7 de la GNU AGPL versión 3)
+
+a) Atribución (sección 7, inciso b). Toda copia, versión modificada o instalación de este programa, incluida la
+   que se ofrece a usuarios a través de una red, debe conservar:
+     1. este archivo NOTICE y los avisos de copyright de los archivos fuente;
+     2. la atribución visible en la interfaz de usuario: el texto «por Alfredo Toledo · SuriyacoValley · La Rioja,
+        Argentina» en el encabezado de la aplicación, legible y sin ocultar, y la misma atribución en los pies de
+        los informes y documentos que genera el programa;
+     3. el enlace al código fuente de la interfaz.
+   Estos textos son «Avisos Legales Apropiados» (Appropriate Legal Notices) en el sentido de la sección 5(d).
+
+b) Versiones modificadas (sección 7, inciso c). Una versión modificada debe indicarse como tal de forma razonable
+   (por ejemplo, «basado en Suriyaco MassFlow 3D de Alfredo Toledo») y no puede presentarse como la versión
+   original ni como respaldada por su autor.
+
+c) Nombre (sección 7, inciso e). Esta licencia no otorga derechos sobre el nombre «Suriyaco MassFlow 3D» ni
+   «SuriyacoValley» como marca, salvo para la atribución exigida arriba.
+
+Estos términos adicionales no pueden quitarse de una copia mientras se conserve la atribución al autor original.
+
+
+COMPONENTES Y DATOS DE TERCEROS
+
+La aplicación usa, cada uno con su propia licencia: Leaflet (BSD-2-Clause), three.js (MIT), íconos Calcite UI de
+Esri (cargados desde su CDN oficial, sin modificar), FastAPI (MIT), NumPy y SciPy (BSD-3-Clause), rasterio
+(BSD-3-Clause) y GDAL (MIT), pyproj (MIT), laspy (BSD-2-Clause), pyarrow (Apache-2.0) y Taichi (Apache-2.0).
+Datos externos: OpenTopography, AWS Terrain Tiles, ESA WorldCover (CC BY 4.0), OpenStreetMap (ODbL) y
+GlobalBuildingAtlas (Zhu et al. 2025).

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Asistente flotante de configuración: las secciones del escenario como pasos en orden (anterior / siguiente),
 // en una ventana que se puede mover y minimizar sobre el mapa. La barra lateral muestra el índice de pasos.
 import {ic} from './icons.js';

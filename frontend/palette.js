@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Alfredo Toledo · SuriyacoValley · La Rioja, Argentina
+// SPDX-License-Identifier: AGPL-3.0-or-later (con términos adicionales de atribución, ver NOTICE)
 // Paletas de color compartidas por la escena, el mapa, los informes y las comparaciones.
 export const RAMPS = {
   speed: ['#39a8ff', '#41e280', '#ffe55c', '#ff8a3d', '#e847ff'],
