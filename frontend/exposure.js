@@ -64,6 +64,9 @@ export class Exposure {
     this.map = map;
     this.world = world;
     this.layer = L.layerGroup().addTo(map);
+    // los edificios van en una capa propia, para poder apagarlos (control de capas del mapa y casilla de la vista 3D)
+    this.bLayer = L.layerGroup().addTo(map);
+    this.showBuildings = true;
     // los edificios van sobre las zonas de afectación para poder tocarlos
     if (!map.getPane('buildingsPane')) map.createPane('buildingsPane').style.zIndex = 450;
     this.renderer = L.canvas({padding: 0.3, pane: 'buildingsPane'});
@@ -120,7 +123,7 @@ export class Exposure {
     const b = example.buildings = normBuildings(example);
     this.buildings = b;
     this.markers = b.map(({lon: lo, lat: la}, i) => L.circleMarker([la, lo], {renderer: this.renderer, radius: 2.2, weight: 0, fillOpacity: .9, fillColor: INTENSITY_COLORS[0], bubblingMouseEvents: false})
-      .on('click', () => this.openBuilding(i)).addTo(this.layer));
+      .on('click', () => this.openBuilding(i)).addTo(this.bLayer));
   }
 
   openBuilding(i, zoom = false) {
@@ -131,8 +134,17 @@ export class Exposure {
       .setContent(buildingHTML(b, buildingImpact(this.result && this.result.points, i))).openOn(this.map);
   }
 
+  // mostrar u ocultar los edificios en el mapa y en 3D
+  setBuildingsVisible(on) {
+    this.showBuildings = on;
+    if (on && !this.map.hasLayer(this.bLayer)) this.bLayer.addTo(this.map);
+    if (!on && this.map.hasLayer(this.bLayer)) { this.bLayer.remove(); this.map.closePopup(); }
+    if (this.mesh) this.mesh.visible = on;
+  }
+
   clear() {
     this.layer.clearLayers();
+    this.bLayer.clearLayers();
     this.markers = [];
     this.example = null;
     this.buildings = null;
@@ -263,6 +275,7 @@ export class Exposure {
       const s = Math.min(40, Math.max(4, Math.sqrt(b.area || 60)));
       return {x, y, s, h: buildingHeight(b) || hDef, z: bedAt(x, y), inside: x >= 0 && y >= 0 && x <= d.Lx && y <= d.Ly};
     });
+    this.mesh.visible = this.showBuildings;
     this.world.add(this.mesh);
     this.shown = -2;
   }

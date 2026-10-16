@@ -149,6 +149,13 @@ input.bad{border-color:var(--danger);background:#fdf1ef}
 .impact td.sub{color:var(--t3);font-size:11px;padding-left:14px}
 .gauge-label{color:#fff;font-size:11px;font-weight:700;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
 
+/* tarjeta de carga de un análisis (biblioteca o resultado nuevo) */
+#toolbar .tb-check{display:flex;align-items:center;gap:6px;align-self:end;white-space:nowrap;padding-bottom:6px}
+#loadCard{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:1750;width:min(460px,calc(100% - 28px));background:var(--fg1);box-shadow:0 8px 32px rgba(0,0,0,.25);border-top:4px solid var(--brand);padding:14px 16px 10px}
+#loadCard .rc-spin .ic{animation:spin 1.1s linear infinite}
+#ldPct{font-size:24px;font-weight:600;color:var(--brand);font-variant-numeric:tabular-nums}
+.ld-info{display:block;color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums}
+
 /* tarjeta de progreso de la simulación */
 #runCard{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:1700;width:min(520px,calc(100% - 28px));background:var(--fg1);box-shadow:0 8px 32px rgba(0,0,0,.25);border-top:4px solid var(--brand);padding:14px 16px 12px}
 .rc-head{display:flex;align-items:center;gap:12px}
@@ -495,4 +502,44 @@ body.splitting #map,body.splitting #scene{pointer-events:none}
   header .ver:not(.author){display:none}
   header .author{border-left:0;padding-left:0;font-size:11px;line-height:1.3}
   header .hdr-btn{padding:6px 8px;font-size:12px}
+}
+
+/* ── paneles plegables y versión móvil ───────────────────────────────────── */
+/* sin zoom de la página con dos dedos ni doble toque; el mapa y la vista 3D conservan sus gestos */
+html,body{touch-action:manipulation;-webkit-text-size-adjust:100%}
+#gl,#map{touch-action:none}
+/* barra lateral completa */
+main.aside-off{grid-template-columns:1fr}
+main.aside-off>aside{display:none}
+#asideToggle.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+#asideToggle.active .ic{color:#fff}
+/* pasos */
+.fold-btn{display:flex;align-items:center;gap:6px;width:auto;margin:0;padding:2px 4px 2px 0;background:none;border:0;color:var(--t1);font:inherit;cursor:pointer}
+.fold-btn:hover{background:none}
+.fold-btn .ic{margin:0;color:var(--t2);transition:transform .15s}
+.steps-card.folded #stepList{display:none}
+.steps-card.folded .fold-btn .ic{transform:rotate(-90deg)}
+/* resultados: la sección aparece solo cuando hay un resumen */
+#resSec{margin:0 14px}
+#resSec #summary{margin:0}
+#resSec:has(#summary:empty){display:none}
+/* controles de la vista 3D */
+.tb-fold{display:flex;align-items:center;gap:4px;width:auto;margin:0;padding:5px 8px;font:600 12px var(--font);background:var(--fg1);color:var(--t1);border:1px solid var(--b1);border-radius:2px;align-self:center}
+.tb-fold:hover{background:var(--brand-l)}
+.tb-fold .ic{margin:0;color:var(--brand)}
+.tb-fold .fold-ic .ic,.tb-fold .fold-ic{transition:transform .15s}
+#toolbar.folded{padding:4px;gap:0}
+#toolbar.folded>:not(.tb-fold){display:none}
+#toolbar.folded .fold-ic{transform:rotate(180deg)}
+@media(max-width:800px){
+  /* mapa y 3D llenan la pantalla debajo del encabezado; la barra lateral queda abajo */
+  section{height:calc(100vh - var(--hdr,96px));height:calc(100dvh - var(--hdr,96px));--split:48%}
+  #toolbar{top:8px;left:8px;max-width:calc(100% - 16px);gap:6px 10px;padding:6px 8px}
+  #toolbar select{max-width:150px}
+  #toolbar:not(.folded){max-height:calc(100% - 96px);overflow:auto}
+  /* encabezado: los botones quedan solo con su ícono para que el crédito no se tape */
+  header .hdr-txt{display:none}
+  header .hdr-btn{padding:7px 9px}
+  header .hdr-btn .ic{margin:0}
+  header .hdr-btn{padding:6px 8px}
 }

@@ -3,7 +3,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link rel="icon" href="data:,">
 <title>Suriyaco MassFlow 3D</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -16,7 +16,8 @@
   <div class="brand"><span class="logo" data-ic="globe" data-ic-size="24"></span><b>Suriyaco MassFlow 3D</b><span class="ver">v0.2</span><span class="ver author" title="Desarrollado por Alfredo Toledo · SuriyacoValley · La Rioja, Argentina">por Alfredo Toledo · SuriyacoValley · La Rioja, Argentina · <a href="https://github.com/suriyaco82/simuladorAlud" target="_blank" rel="noopener" title="Código fuente: software libre bajo licencia GNU AGPL-3.0">código (AGPL-3.0)</a></span></div>
   <small>MPM 3D sobre DEM · volumen real · erosión/deposición · agua y presión de poros</small>
   <div id="runChip" hidden></div>
-  <button type="button" class="tool hdr-btn" id="methodsBtn" data-ic="book" title="Qué calcula cada motor y con qué ecuaciones">Métodos de cálculo</button>
+  <button type="button" class="tool hdr-btn" id="asideToggle" data-ic="hamburger" title="Mostrar u ocultar el panel lateral" aria-label="Panel"><span class="hdr-txt">Panel</span></button>
+  <button type="button" class="tool hdr-btn" id="methodsBtn" data-ic="book" title="Métodos de cálculo: qué calcula cada motor y con qué ecuaciones" aria-label="Métodos de cálculo"><span class="hdr-txt">Métodos de cálculo</span></button>
 </header>
 <main>
 <aside>
@@ -25,7 +26,7 @@
     <button type="button" class="mode-btn" data-mode="flood" data-ic="rain">Cuencas e inundación por lluvia</button>
   </div>
   <div class="steps-card">
-    <div class="steps-head"><b id="stepsMode">Pasos de la simulación</b><button class="tool" id="stepsOpen" data-ic="sliders-horizontal">Configurar</button></div>
+    <div class="steps-head"><button type="button" class="fold-btn" id="stepsFold" title="Plegar / desplegar los pasos" aria-expanded="true"><span class="fold-ic" data-ic="chevron-down"></span><b id="stepsMode">Pasos de la simulación</b></button><button class="tool" id="stepsOpen" data-ic="sliders-horizontal">Configurar</button></div>
     <ol id="stepList"></ol>
   </div>
   <div class="row">
@@ -34,7 +35,10 @@
   </div>
   <div class="progress"><i id="bar"></i></div>
   <div id="status">Listo.</div>
-  <div id="summary"></div>
+  <details open id="resSec">
+    <summary data-ic="graph-bar">Resultados</summary>
+    <div id="summary"></div>
+  </details>
 
   <details open id="libSec">
     <summary data-help="sec-library" data-ic="collection">Biblioteca de análisis <span id="libCount" class="sum-count"></span></summary>
@@ -59,6 +63,7 @@
   <div id="scene">
     <canvas id="gl"></canvas>
     <div id="toolbar">
+      <button type="button" class="tb-fold" id="tbFold" title="Mostrar u ocultar los controles de la vista" aria-expanded="true" data-ic="sliders-horizontal">Vista<span class="fold-ic" data-ic="chevron-up"></span></button>
       <label>Vista
         <select id="view">
           <option value="realistic">Realista</option>
@@ -110,6 +115,7 @@
           <option value="max_hv">h·v máx.</option>
           <option value="wet_time">Duración del anegamiento</option>
         </select></label>
+      <label class="check tb-check" title="Mostrar u ocultar los edificios en el mapa y en la vista 3D"><input type="checkbox" id="bldToggle" checked> Edificios</label>
     </div>
     <div id="empty">Dibujá la zona y el área de desprendimiento, luego Simular.</div>
     <div id="player">
@@ -126,6 +132,15 @@
     <div id="legend"></div>
   </div>
   <!-- progreso de la simulación (visible mientras calcula) -->
+  <div id="loadCard" hidden role="status" aria-live="polite">
+    <div class="rc-head">
+      <span class="rc-spin" data-ic="refresh" data-ic-size="24"></span>
+      <div class="rc-titles"><b id="ldStage">Abriendo el análisis…</b><small id="ldName"></small></div>
+      <span id="ldPct"></span>
+    </div>
+    <div class="rc-bar"><i id="ldBar"></i></div>
+    <small id="ldInfo" class="ld-info"></small>
+  </div>
   <div id="runCard" hidden role="status" aria-live="polite">
     <div class="rc-head">
       <span class="rc-spin" data-ic="refresh" data-ic-size="24"></span>

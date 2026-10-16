@@ -78,8 +78,46 @@ const refLayers = {
   'Relieve sombreado (Esri)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', {maxZoom: 16, opacity: .45, attribution: '© Esri'}),
 };
 baseLayers['Imágenes (Esri)'].addTo(map);
-L.control.layers(baseLayers, refLayers).addTo(map);
+const layersCtl = L.control.layers(baseLayers, refLayers).addTo(map);
 L.control.scale({imperial: false}).addTo(map);
+
+// Paneles plegables (barra lateral completa, pasos, controles de la vista 3D) y gestos en el celular. Lo plegado se
+// recuerda en este navegador; en pantallas chicas los controles de la vista arrancan plegados.
+(() => {
+  const mobile = matchMedia('(max-width: 800px)').matches;
+  const get = (k, def) => { try { const v = localStorage.getItem(k); return v == null ? def : v === '1'; } catch { return def; } };
+  const put = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch { /* sin almacenamiento */ } };
+  const relayout = () => requestAnimationFrame(() => map.invalidateSize({pan: false}));
+  // barra lateral completa
+  const main = document.querySelector('main');
+  const setAside = off => {
+    main.classList.toggle('aside-off', off);
+    $('asideToggle').classList.toggle('active', !off);
+    $('asideToggle').setAttribute('aria-pressed', String(!off));
+    put('asideOff', off); relayout();
+  };
+  $('asideToggle').onclick = () => setAside(!main.classList.contains('aside-off'));
+  setAside(get('asideOff', false));
+  // pasos de la simulación
+  const steps = document.querySelector('.steps-card');
+  const setSteps = folded => { steps.classList.toggle('folded', folded); $('stepsFold').setAttribute('aria-expanded', String(!folded)); put('stepsFolded', folded); };
+  $('stepsFold').onclick = () => setSteps(!steps.classList.contains('folded'));
+  setSteps(get('stepsFolded', false));
+  // controles de la vista 3D
+  const tb = $('toolbar');
+  const setTb = folded => { tb.classList.toggle('folded', folded); $('tbFold').setAttribute('aria-expanded', String(!folded)); put('tbFolded', folded); };
+  $('tbFold').onclick = () => setTb(!tb.classList.contains('folded'));
+  setTb(get('tbFolded', mobile));
+  // alto del encabezado (en el celular ocupa dos líneas): el mapa y el 3D llenan el resto de la pantalla
+  const hdr = document.querySelector('header');
+  const setHdr = () => { document.documentElement.style.setProperty('--hdr', hdr.offsetHeight + 'px'); relayout(); };
+  new ResizeObserver(setHdr).observe(hdr);
+  // sin zoom de la página con dos dedos (Safari en iOS ignora user-scalable=no); el mapa y el 3D tienen sus gestos
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('touchmove', e => {
+    if (e.touches.length > 1 && !e.target.closest('#map, #gl')) e.preventDefault();
+  }, {passive: false});
+})();
 
 // Divisor arrastrable entre el mapa y la vista 3D; el tamaño elegido se recuerda en este navegador
 (() => {
@@ -824,7 +862,8 @@ async function poll() {
     if (s.status === 'done') {
       runUI.show('Descargando resultados…', 100);
       await library.refresh();
-      await loadResult(id); setRunning(false); runUI.end();
+      runUI.end(); loadUI.start($('anaName').value.trim() || $('rcName').textContent);
+      await loadResult(id); setRunning(false);
       library.setCurrent(id);
       runFinished(result.meta, s.elapsed_s);
       return;
@@ -835,18 +874,71 @@ async function poll() {
       return;
     }
   } catch (e) {
-    status('Sin conexión con el backend: ' + e.message, true); setRunning(false); runUI.end();
+    status('Sin conexión con el backend: ' + e.message, true); setRunning(false); runUI.end(); loadUI.end();
     toast('danger', 'Sin conexión con el backend', e.message); return;
   }
   pollTimer = setTimeout(poll, 600);
 }
 
-async function loadResult(id, base = `${API}/api/jobs/${id}`) {
+// ───────────────────────────── Carga de un resultado con barra de progreso
+const fmtMB = b => fmt(b / 1e6, b >= 1e7 ? 0 : 1);
+const loadUI = {
+  start(name) {
+    $('ldName').textContent = name || '';
+    $('ldInfo').textContent = '';
+    this.stage('Abriendo el análisis…', null);
+    $('loadCard').hidden = false;
+  },
+  stage(text, pct) {
+    $('ldStage').textContent = text;
+    $('ldPct').textContent = pct == null ? '' : `${Math.floor(pct)}%`;
+    $('ldBar').style.width = (pct || 0) + '%';
+    $('ldBar').classList.toggle('indet', pct == null);
+  },
+  end() { $('loadCard').hidden = true; },
+};
+// descarga leyendo el cuerpo por partes: avisa los bytes recibidos y el total (X-File-Size, o Content-Length si no
+// está comprimido); sin total la barra queda indeterminada y se muestran los MB recibidos
+async function fetchProgress(url, onProgress) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(await errText(r));
+  const total = +(r.headers.get('X-File-Size') || (r.headers.get('Content-Encoding') ? 0 : r.headers.get('Content-Length')) || 0);
+  onProgress(0, total);
+  if (!r.body || !r.body.getReader) { const b = await r.arrayBuffer(); onProgress(b.byteLength, total); return b; }
+  const reader = r.body.getReader(), parts = [];
+  let got = 0;
+  for (;;) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    parts.push(value);
+    got += value.byteLength;
+    onProgress(got, total);
+  }
+  const out = new Uint8Array(got);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.byteLength; }
+  return out.buffer;
+}
+
+async function loadResult(id, base = `${API}/api/jobs/${id}`, name = '') {
   status('Descargando resultados…');
+  if ($('loadCard').hidden) loadUI.start(name);
+  // las dos descargas a la vez, con un único porcentaje sobre el total de bytes
+  const prog = {result: [0, 0], data: [0, 0]};
+  const show = () => {
+    const got = prog.result[0] + prog.data[0], tot = prog.result[1] + prog.data[1];
+    const known = prog.result[1] > 0 && prog.data[1] > 0;
+    loadUI.stage('Descargando resultados…', known ? Math.min(99, got / tot * 100) : null);
+    $('ldInfo').textContent = known ? `${fmtMB(got)} de ${fmtMB(tot)} MB` : `${fmtMB(got)} MB recibidos`;
+  };
   const [meta, buf] = await Promise.all([
-    fetch(`${base}/result`).then(r => { if (!r.ok) throw new Error('resultado no disponible'); return r.json(); }),
-    fetch(`${base}/data.bin`).then(r => { if (!r.ok) throw new Error('datos no disponibles'); return r.arrayBuffer(); }),
+    fetchProgress(`${base}/result`, (g, t) => { prog.result = [g, t]; show(); })
+      .then(b => JSON.parse(new TextDecoder().decode(b))),
+    fetchProgress(`${base}/data.bin`, (g, t) => { prog.data = [g, t]; show(); }),
   ]);
+  loadUI.stage('Preparando la escena 3D…', 100);
+  $('ldInfo').textContent = `${fmtMB(prog.result[0] + prog.data[0])} MB descargados`;
+  await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));  // que se vea el cambio antes del trabajo pesado
   const d = meta.domain, n = d.nx * d.ny, gm = meta.grid_frames, gn = gm ? gm.nx * gm.ny : 0;
   const fields = {};
   for (const [k, a] of Object.entries(meta.arrays)) fields[k] = new Float32Array(buf, a.offset, a.length);
@@ -884,6 +976,7 @@ async function loadResult(id, base = `${API}/api/jobs/${id}`) {
   if (pendingLayer && [...$('layer').options].some(o => o.value === pendingLayer)) { $('layer').value = pendingLayer; pendingLayer = null; applyLayer(); }
   simT = 0; dynKey = null; playing = false; updatePlayBtn(); showTime(0); refreshDynamic(true);
   status(`${ic('check-circle')} Listo · ${meta.model} · ${meta.solver.device} — <b>Reproducir</b> para ver el evento`);
+  loadUI.end();
 }
 
 // ───────────────────────────── Biblioteca, informes y comparaciones
@@ -913,6 +1006,8 @@ async function openAnalysis(id) {
   if (!$('cancel').disabled) { status('Hay una simulación en curso: esperá a que termine o cancelala para abrir otro análisis.', true); return; }
   try {
     status(ic('refresh', 16, 'spin') + ' Abriendo el análisis guardado…');
+    const le = library.entry(id);
+    loadUI.start(le ? le.name : '');
     const r = await fetch(`${API}/api/library/${id}`);
     if (!r.ok) throw new Error(await errText(r));
     const e = await r.json(), ex = e.ui && e.ui.example, v = (e.ui && e.ui.view) || {};
@@ -926,12 +1021,12 @@ async function openAnalysis(id) {
     if (v.mapLayer) $('mapLayer').value = v.mapLayer;
     if (v.exag) { $('exag').value = v.exag; applyExag(); }
     if (v.matStyle) $('matStyle').value = v.matStyle;
-    await loadResult(id, `${API}/api/library/${id}`);
+    await loadResult(id, `${API}/api/library/${id}`, e.name);
     library.setCurrent(id);
     const d = result.meta.domain;
     map.fitBounds([[d.south, d.west], [d.north, d.east]], {padding: [10, 10]});
     status(`${ic('folder-open')} Análisis abierto sin recalcular: <b>${esc(e.name)}</b> · ${esc(e.project)}. <b>Reproducir</b> para ver el evento; tocá las zonas del mapa para ver su detalle.`);
-  } catch (err) { status('No se pudo abrir el análisis: ' + err.message, true); }
+  } catch (err) { loadUI.end(); status('No se pudo abrir el análisis: ' + err.message, true); }
 }
 // el resultado de la escena, para que los informes no vuelvan a descargar sus campos
 const loaded = () => result && {id: result.id, meta: result.meta, fields: result.fields, buildings: result.buildings};
@@ -1049,6 +1144,11 @@ scene.add(world);
 let terrain = null, points = null, reliefColors = null, currentEro = -2, satTex = null;
 const realistic = new Realistic(world);
 const exposure = new Exposure(map, world);
+// edificios como capa: se apagan desde el control de capas del mapa o desde la casilla de la vista 3D
+layersCtl.addOverlay(exposure.bLayer, 'Edificios');
+const setBuildings = on => { exposure.setBuildingsVisible(on); $('bldToggle').checked = on; };
+$('bldToggle').onchange = e => setBuildings(e.target.checked);
+map.on('overlayadd overlayremove', e => { if (e.layer === exposure.bLayer) setBuildings(e.type === 'overlayadd'); });
 const zones = new ImpactZones(map, exposure);
 const SKY = skyTexture(), DARK = new THREE.Color(0x02070b);
 let spdA = new Float32Array(0), lamA = new Float32Array(0), flgA = new Uint8Array(0);

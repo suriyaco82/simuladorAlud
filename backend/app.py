@@ -39,7 +39,7 @@ AUTHOR = "Alfredo Toledo · SuriyacoValley · La Rioja, Argentina"
 app = FastAPI(title="Suriyaco MassFlow 3D", version="0.2.0", description=f"Simulador de movimientos de masa e inundaciones. Desarrollado por {AUTHOR}.",
               contact={"name": AUTHOR, "url": "https://github.com/suriyaco82/simuladorAlud"},
               license_info={"name": "AGPL-3.0-or-later", "url": "https://www.gnu.org/licenses/agpl-3.0.html"})
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["X-File-Size"])
 app.add_middleware(GZipMiddleware, minimum_size=4096)
 
 
@@ -720,6 +720,15 @@ def job_cancel(jid: str):
         return {"id": jid, "status": "cancelled", "stage": "Cancelada", "error": None, "progress": {}}
 
 
+def _sized(path, media_type):
+    """Descarga de un archivo con su tamaño real en X-File-Size: la compresión gzip quita Content-Length, y el frontend
+    lo necesita para la barra de progreso."""
+    path = Path(path)
+    if not path.exists():
+        raise HTTPException(404, "Archivo inexistente")
+    return FileResponse(path, media_type=media_type, headers={"X-File-Size": str(path.stat().st_size)})
+
+
 def _job_file(jid, name):
     j = jobs.get(jid)
     if not j or library.exists(jid):
@@ -733,12 +742,12 @@ def _job_file(jid, name):
 
 @app.get("/api/jobs/{jid}/result")
 def job_result(jid: str):
-    return FileResponse(_job_file(jid, "result.json"), media_type="application/json")
+    return _sized(_job_file(jid, "result.json"), "application/json")
 
 
 @app.get("/api/jobs/{jid}/data.bin")
 def job_data(jid: str):
-    return FileResponse(_job_file(jid, "data.bin"), media_type="application/octet-stream")
+    return _sized(_job_file(jid, "data.bin"), "application/octet-stream")
 
 
 # ───────────────────────────── Biblioteca de análisis
@@ -788,12 +797,12 @@ def library_result(aid: str):
         library.ensure_impact(aid)  # resultados anteriores a las zonas de afectación
     except Exception as e:
         print(f"[biblioteca] no se pudieron calcular las zonas de {aid}: {e}")
-    return FileResponse(library.dir(aid) / "result.json", media_type="application/json")
+    return _sized(library.dir(aid) / "result.json", "application/json")
 
 
 @app.get("/api/library/{aid}/data.bin")
 def library_data(aid: str):
-    return FileResponse(library.dir(_lib(aid)) / "data.bin", media_type="application/octet-stream")
+    return _sized(library.dir(_lib(aid)) / "data.bin", "application/octet-stream")
 
 
 @app.get("/api/library/{aid}/field/{name}")
