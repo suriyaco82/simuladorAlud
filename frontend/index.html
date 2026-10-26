@@ -24,6 +24,7 @@
   <div class="modebar" role="tablist" aria-label="Tipo de simulación">
     <button type="button" class="mode-btn" data-mode="mass" data-ic="cube">Movimiento de masa</button>
     <button type="button" class="mode-btn" data-mode="flood" data-ic="rain">Cuencas e inundación por lluvia</button>
+    <button type="button" class="mode-btn" data-mode="urban" data-ic="urban-model">Inundación urbana</button>
   </div>
   <div class="steps-card">
     <div class="steps-head"><button type="button" class="fold-btn" id="stepsFold" title="Plegar / desplegar los pasos" aria-expanded="true"><span class="fold-ic" data-ic="chevron-down"></span><b id="stepsMode">Pasos de la simulación</b></button><button class="tool" id="stepsOpen" data-ic="sliders-horizontal">Configurar</button></div>
@@ -98,6 +99,7 @@
           <option value="max_hv">h·v máx.</option>
           <option value="runoff_total">Lluvia efectiva (escorrentía)</option>
           <option value="wet_time">Duración del anegamiento</option>
+          <option value="max_sewage">Agua con líquido cloacal</option>
         </select></label>
       <label>Capa en el mapa
         <select id="mapLayer">
@@ -114,6 +116,7 @@
           <option value="max_cv">Concentración de sedimento máx. Cv</option>
           <option value="max_hv">h·v máx.</option>
           <option value="wet_time">Duración del anegamiento</option>
+          <option value="max_sewage">Agua con líquido cloacal</option>
         </select></label>
       <label class="check tb-check" title="Mostrar u ocultar los edificios en el mapa y en la vista 3D"><input type="checkbox" id="bldToggle" checked> Edificios</label>
     </div>
@@ -256,6 +259,10 @@
       <details open id="plainSec" data-step="plain" hidden>
         <summary data-help="sec-plain" data-ic="layers">Llanura: suelo, ríos y caminos</summary>
         <div id="plainBody"></div>
+      </details>
+      <details open id="urbanSec" data-step="urban" hidden>
+        <summary data-help="sec-urban" data-ic="urban-model">Inundación urbana: calles y desagües</summary>
+        <div id="urbanBody"></div>
       </details>
       <details open id="materialSec" data-step="material">
         <summary data-help="sec-material" data-ic="cube">Material</summary>

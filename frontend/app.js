@@ -10,6 +10,7 @@ import {ic, hydrateIcons} from './icons.js';
 import {RainPanel} from './rain.js';
 import {BasinsPanel, floodBasinsHTML, FLOW} from './basins.js';
 import {PlainPanel} from './plain.js';
+import {UrbanPanel} from './urban.js';
 import {RAMPS, hexRGB} from './palette.js';
 import {ImpactZones} from './zones.js';
 import {LibraryPanel, loadAnalysis} from './library.js';
@@ -60,6 +61,7 @@ const LAYERS = {
   max_hv:     {name: 'h·v máx.', unit: 'm²/s', ramp: 'depth', mask: v => v > 0.05},
   runoff_total: {name: 'Lluvia efectiva (escorrentía)', unit: 'mm', ramp: 'arrival', mask: v => v > 0.5, always: true},
   wet_time:   {name: 'Duración del anegamiento (h > 0,1 m)', unit: 'h', ramp: 'arrival', mask: v => v > 0.05},
+  max_sewage: {name: 'Agua mezclada con líquido cloacal (fracción máx.)', unit: '', ramp: 'pore', mask: v => v > 0.01, fixed: [0, 1]},
 };
 
 // ───────────────────────────── Mapa
@@ -164,6 +166,8 @@ const wizard = new Wizard({
     plain: () => { const v = plainPanel.v; return [v.flood.depressions === 'keep' ? 'bajos conservados' : null, v.infiltration.method === 'green_ampt' ? 'Green-Ampt' : 'SCS-CN',
       v.inflows.length ? `${v.inflows.length} entrada(s) de caudal` : null, v.roads.items.length ? `${v.roads.items.length} caminos` : null,
       v.landuse.worldcover || v.landuse.polygons.length ? 'uso del suelo' : null].filter(Boolean).join(' · '); },
+    urban: () => { const v = urbanPanel.v; return v.enabled ? [`${v.streets.length} calles`, `${v.barrios.length} barrios`,
+      v.storm.enabled || v.barrios.some(b => b.storm_drain) ? 'red pluvial' : 'sin red pluvial', v.sewer.enabled ? 'cloacas' : null].filter(Boolean).join(' · ') : 'Desactivada'; },
     basins: () => { const st = basinsPanel.params().storm; return `Tormenta ${fmt(st.rain_mm ?? 60, 0)} mm en ${fmt(st.duration_h ?? 3, 2)} h · ${basinsPanel.data ? 'cuencas delineadas' : plainPanel.skipBasins ? 'lluvia en toda la zona' : 'falta delinear las cuencas'}`; },
     material: () => $('preset').selectedOptions[0] && $('preset').selectedOptions[0].text,
     water: () => `Saturación ${(+$('saturation').value).toFixed(2)}`,
@@ -399,6 +403,7 @@ map.on('click', e => {
   if (editor.capturesMapClicks) return;
   if (basinsPanel.capturesMapClicks) { basinsPanel.addOutlet(e.latlng); return; }
   if (plainPanel.capturesMapClicks) { plainPanel.onMapClick(e.latlng); return; }
+  if (urbanPanel.capturesMapClicks) { urbanPanel.onMapClick(e.latlng); return; }
   if (drawMode === 'poly') { addVertex(e.latlng); return; }
   if (drawMode) return;
   if (marker) marker.remove();
@@ -408,6 +413,7 @@ map.on('click', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && basinsPanel.capturesMapClicks) basinsPanel.setPicking(false);
   if (e.key === 'Escape' && plainPanel.capturesMapClicks) plainPanel.setPick(null);
+  if (e.key === 'Escape' && urbanPanel.capturesMapClicks) urbanPanel.setPick(null);
   if (!drawMode || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   if (e.key === 'Escape') setMode(null);
   if (drawMode === 'poly' && e.key === 'Enter') finishPoly();
@@ -546,6 +552,7 @@ function loadExample(ex, run, quiet = false) {
   rainPanel.refresh();
   basinsPanel.load(p);
   plainPanel.load(p);
+  urbanPanel.load(p);
   updateGbaInfo();
   applyEngine();
   setRelease(p.release_polygon ? p.release_polygon.map(([lo, la]) => L.latLng(la, lo)) : null);
@@ -598,14 +605,38 @@ const plainPanel = new PlainPanel({
     }
   },
 });
+// ───────────────────────────── Inundación urbana: calles pavimentadas, barrios, desagües pluviales y cloacales
+const urbanPanel = new UrbanPanel({
+  api: API, map, body: $('urbanBody'), status, getBBox: () => bbox(), onPick: on => wizard.drawing(on),
+  startDraw: cb => { polyTarget = cb; setMode('poly'); status('Barrio: clic agrega vértices; doble clic, Enter o clic en el primer vértice cierra; Esc cancela.'); },
+  onToggle: () => markModeButtons(),
+  onPreset: () => {
+    // ciudad: los bajos (pasos bajo nivel, esquinas) acumulan, llueve en toda la zona, sin procesos de montaña
+    Object.assign(plainPanel.v.flood, {depressions: 'keep', rain_outside: true, dt_max: 5});
+    plainPanel.render();
+    const st = basinsPanel.v.storm;
+    basinsPanel.patch({flood: {landslides: false, boulders: 0, trees_per_km: 0, hillslope_erodible_m: 0, entrainment_coeff: 0, subgrid_channels: false},
+      debris: {channel_erodible_m: 0}, storm: {areal_reduction: false}, sim: {sim_h: Math.max(basinsPanel.v.sim.sim_h || 0, (st.duration_h || 3) + 3)}});
+    if (+$('dx').value > 10) { $('dx').value = 5; $('dx').dispatchEvent(new Event('input')); }
+    status('Preset urbano aplicado: bajos conservados, lluvia en toda la zona, dx 5 m, sin aludes ni bloques. Cargá las calles y barrios de OSM, indicá qué barrios tienen red pluvial y definí la tormenta (p. ej. 80–120 mm en 2–3 h).');
+    toast('info', 'DEM de detalle', 'Las calles se resuelven con dx ≤ 5 m: usá un DEM de detalle (MDE-Ar 5 m del IGN o LiDAR) cargado como DEM propio en el paso Zona de cálculo.', [], 9000);
+  },
+});
 const isFlood = () => $('engine').value === 'flood';
+const markModeButtons = () => {
+  const mode = !isFlood() ? 'mass' : urbanPanel.enabled ? 'urban' : 'flood';
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  wizard.renderList();
+};
 // el motor de inundación no usa desprendimiento, material ni partículas: se muestran solo sus controles
 function applyEngine() {
   const fl = isFlood();
   basinsPanel.setVisible(fl);
   plainPanel.setVisible(fl);
+  urbanPanel.setVisible(fl);
   $('plainSec').hidden = !fl;
-  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', (b.dataset.mode === 'flood') === fl));
+  $('urbanSec').hidden = !fl;
+  markModeButtons();
   $('basinSec').hidden = !fl;
   for (const id of ['releaseSec', 'materialSec', 'aguaSec', 'erosionSec']) $(id).hidden = fl;
   if (fl) $('rainSec').hidden = true; else rainPanel.refresh();
@@ -618,8 +649,9 @@ function applyEngine() {
 }
 // selector de tipo de simulación (arriba de la barra lateral): elige el motor
 document.querySelectorAll('.mode-btn').forEach(b => b.onclick = () => {
-  const fl = b.dataset.mode === 'flood';
-  if (fl === isFlood()) { wizard.show(); return; }
+  const fl = b.dataset.mode !== 'mass', urb = b.dataset.mode === 'urban';
+  if (fl && urb !== urbanPanel.enabled) urbanPanel.setEnabled(urb);
+  if (fl === isFlood()) { markModeButtons(); wizard.show(urb ? 'urban' : undefined); return; }
   $('engine').value = fl ? 'flood' : ($('engine').querySelector('option[value=mpm]').disabled ? 'particles' : 'mpm');
   // las cuencas necesitan el terreno real: el DEM sintético es un relieve inventado
   if (fl && $('dataset').value === 'SYNTHETIC') {
@@ -627,7 +659,7 @@ document.querySelectorAll('.mode-btn').forEach(b => b.onclick = () => {
     toast('info', 'DEM cambiado a AWS_TERRAIN', 'Las cuencas se delinean sobre el terreno real. El DEM SYNTHETIC es un relieve de prueba que no corresponde al lugar del mapa.', [], 8000);
   }
   applyEngine();
-  wizard.show('start');
+  wizard.show(urb ? 'urban' : 'start');
 });
 $('engine').addEventListener('change', applyEngine);
 $('engine').addEventListener('input', applyEngine);
@@ -790,7 +822,9 @@ function collectParams() {
     const pp = plainPanel.params();
     p.flood = {...p.flood, ...pp.flood};
     delete pp.flood;
-    Object.assign(p, pp);
+    Object.assign(p, pp, urbanPanel.params());
+    // ciudad sin cuencas delineadas: llueve en toda la zona
+    if (urbanPanel.enabled && !basinsPanel.data) p.flood = {...p.flood, rain_outside: true};
     const uz = basinsPanel.urbanZone;
     if (uz && !(p.exposure || []).length) p.exposure = [{name: 'Zona urbana', polygon: uz, erodible: false}];
   }
@@ -815,7 +849,7 @@ $('run').onclick = async () => {
     return;
   }
   if (isFlood()) {
-    const why = plainPanel.skipBasins ? null : basinsPanel.checkReady();
+    const why = plainPanel.skipBasins || urbanPanel.enabled ? null : basinsPanel.checkReady();
     if (why) {
       status(why, true);
       toast('warning', 'Falta definir las cuencas', why, [{label: 'Ir al panel', icon: 'arrow-up', primary: true, fn: () => wizard.show('basins')}], 10000);
@@ -971,6 +1005,9 @@ async function loadResult(id, base = `${API}/api/jobs/${id}`, name = '') {
     plainPanel.showResult(meta);
     const ph = plainPanel.resultHTML(meta);
     if (ph) ($('anaHead') || $('summary')).insertAdjacentHTML($('anaHead') ? 'afterend' : 'afterbegin', ph);
+    urbanPanel.showResult(meta);
+    const uh = urbanPanel.resultHTML(meta);
+    if (uh) ($('anaHead') || $('summary')).insertAdjacentHTML($('anaHead') ? 'afterend' : 'afterbegin', uh);
   }
   releaseOutline = L.polygon(meta.release.polygon.map(([lo, la]) => [la, lo]), {color: '#ffd28a', weight: 1.5, dashArray: '4 3', fill: false, interactive: false}).addTo(map);
   if (pendingLayer && [...$('layer').options].some(o => o.value === pendingLayer)) { $('layer').value = pendingLayer; pendingLayer = null; applyLayer(); }

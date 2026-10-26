@@ -699,7 +699,31 @@ export async function buildReport(A, progress = () => {}) {
         `<td class="n">${['alta', 'media', 'baja'].map(k => fmt(z.area_by_intensity_m2[k] / 1e4, 2)).join(' / ')}</td><td class="n">${fmtT(z.first_arrival_s)}</td>` +
         `<td class="n">${z.depth_p50_p90_m ? z.depth_p50_p90_m.map(v => fmt(v, 2)).join(' / ') : '—'}</td><td class="n">${fmtVol(z.deposit_volume_m3)}</td></tr>`).join('') + `</tbody></table>`;
   }
-  if (m.gauges && m.gauges.length) h += `<h2 class="pb">${pts ? 6 : 5}. Hidrogramas en estaciones virtuales</h2>` + hydroCharts(m.gauges, m.engine);
+  let nsec = pts ? 6 : 5;
+  const U = m.urban;
+  if (U) {
+    const T = U.totals, bar = U.barrios.filter(b => b.severity !== 'Sin afectación');
+    h += `<h2 class="pb">${nsec++}. Inundación urbana: barrios y calles afectadas</h2>` +
+      `<p>La lluvia sobre la ciudad escurre por las calles pavimentadas (bajo el cordón) hacia los puntos bajos. ` +
+      (T.storm_sectors ? `La red pluvial de ${T.storm_sectors} barrio${T.storm_sectors > 1 ? 's' : ''} captó ${fmtVol(T.storm_captured_m3)} y colapsó en ${T.storm_collapsed}. ` : 'La ciudad no tiene red pluvial en la zona: el agua escurre solo por las calles. ') +
+      `La red cloacal recibió ${fmtVol(T.sewer_inflow_m3)} de agua de lluvia, colapsó en ${T.sewer_collapsed} barrio${T.sewer_collapsed === 1 ? '' : 's'} y desbordó ${fmtVol(T.sewer_overflow_m3)} por las bocas de registro` +
+      `${T.sewage_ha ? `, con ${fmt(T.sewage_ha, 2)} ha cubiertas por agua mezclada con líquido cloacal` : ''}.</p>` +
+      `<div class="kpis">${kpi(fmt(T.barrios_affected, 0), 'Barrios afectados', 'red')}${kpi(fmt(T.flooded_ha, 1) + ' ha', 'Zona urbana anegada')}` +
+      `${kpi(fmt(T.streets_affected, 0), 'Calles con agua sobre el cordón', 'org')}${kpi(fmt(T.streets_autos_km, 2) + ' km', 'Intransitables para autos')}</div>` +
+      `<h3>Barrios afectados</h3>` + (bar.length ? `<table><thead><tr><th>Barrio</th><th>Afectación</th><th class="n">Anegado</th><th class="n">h máx. (m)</th><th class="n">Calles</th><th>Red pluvial</th><th class="n">Desborde cloacal</th><th class="n">Edificios</th></tr></thead><tbody>` +
+        bar.map(b => `<tr><td>${esc(b.name)}</td><td>${b.severity}</td><td class="n">${fmt(b.flooded_ha, 2)} ha (${fmt(b.flooded_pct, 0)} %)</td><td class="n">${fmt(b.max_depth_m, 2)}</td><td class="n">${b.streets_affected}</td>` +
+          `<td>${b.storm.exists ? (b.storm.collapse_h != null ? `colapsa a las ${fmt(b.storm.collapse_h, 1)} h` : 'no colapsa') : 'no hay'}</td><td class="n">${b.sewer.overflow_m3 ? fmtVol(b.sewer.overflow_m3) : '—'}</td>` +
+          `<td class="n">${b.buildings ? `${b.buildings_wet} / ${b.buildings}` : '—'}</td></tr>`).join('') + `</tbody></table>` +
+        bar.filter(b => b.streets.length).map(b => `<p class="note"><b>${esc(b.name)}:</b> ${b.streets.map(esc).join(', ')}${b.streets_affected > b.streets.length ? ` y ${b.streets_affected - b.streets.length} más` : ''}.</p>`).join('')
+        : '<p>Ningún barrio con agua sobre 0,10 m.</p>') +
+      `<h3>Calles afectadas</h3>` + (U.streets.length ? `<table><thead><tr><th>Calle</th><th>Barrios</th><th class="n">Sobre el cordón (km)</th><th class="n">&gt; 0,3 m (km)</th><th class="n">h máx. (m)</th><th>Peligrosidad</th><th class="n">Desde</th></tr></thead><tbody>` +
+        U.streets.slice(0, 120).map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.barrios.join(', ') || '—')}</td><td class="n">${fmt(r.cordon_km, 2)}</td><td class="n">${fmt(r.autos_km, 2)}</td>` +
+          `<td class="n">${fmt(r.max_depth_m, 2)}</td><td>${esc((U.hazard.find(x => x.k === r.hazard) || {}).name || '—')}</td><td class="n">${r.first_s != null ? fmtT(r.first_s) : '—'}</td></tr>`).join('') + `</tbody></table>` +
+        (U.streets.length > 120 ? `<p class="note">Se muestran las 120 calles más comprometidas de ${U.streets.length}.</p>` : '')
+        : '<p>Ninguna calle con agua sobre el cordón.</p>') +
+      `<p class="note">${esc(U.criteria)}</p>`;
+  }
+  if (m.gauges && m.gauges.length) h += `<h2 class="pb">${nsec}. Hidrogramas en estaciones virtuales</h2>` + hydroCharts(m.gauges, m.engine);
 
   h += `<h2>Metodología, criterios y limitaciones</h2>` +
     `<p><b>Modelo.</b> ${esc(m.model)}. ${METHOD[m.engine] || ''}</p>` +

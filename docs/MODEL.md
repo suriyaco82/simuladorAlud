@@ -76,6 +76,20 @@ Son opciones del motor `flood`. Ninguna está activa por defecto.
 - **Uso del suelo** (`landuse`). La clase de cada celda (WorldCover o polígonos) define CN (condición II), el Manning fuera de los cauces y el factor de Ks.
 - **Informes**. Caminos: profundidad máxima sobre la calzada, muestreada cada dx/2 (umbrales de Shand et al. 2011). Uso del suelo: superficie con h > 0,1 m y tiempo acumulado con h > 0,1 m.
 
+## Inundación urbana
+
+Opción del motor `flood` (`urban`), en `backend/urbanflood.py`.
+
+- **Calles** (`urban.streets`). Cada tramo se rasteriza con el ancho de su categoría (avenida 18 m, colectora 12, calle 9, pasaje 5) sin saltos en diagonal, porque el agua pasa solo por las caras. La calzada pavimentada baja `curb_m` (0,15 m) respecto de las manzanas, tiene CN 98, Manning 0,015 y no infiltra. Las calles de tierra tienen CN 88, n 0,025 y 0,3·Ks. Las manzanas (el resto de la zona urbana) tienen CN 92, n 0,08 (rugosidad equivalente de las edificaciones) y 0,05·Ks. Si dx > 2 veces el ancho de las calles, cada calle ocupa una celda entera y se avisa.
+- **Canales** (`urban.canals`). El lecho se baja a la mediana del terreno en ~60 m menos `depth_m`, en `width_m`.
+- **Sectores** (`urban.barrios`). Cada polígono es un sector, y cada barrio que es solo un punto toma las celdas urbanas más cercanas (Voronoi, hasta 2 km). La zona urbana es la unión de las zonas expuestas, los barrios y, si no hay zona dibujada, el área a menos de 60 m de las calles. Lo que no cae en ningún barrio forma el sector «Resto de la zona urbana».
+- **Red pluvial**: un depósito por sector con capacidad de conducción Q = i·A (i = `design_mm_h`) y volumen V = `storage_mm`·A. Las bocas captan en las celdas de calle como vertedero, Q = 1,66·L·h^1,5, con L = `inlet_m_per_100m`·dx/100. Si lo que llega supera lo que la red puede recibir en el paso (volumen libre + conducción), la captación se escala. Los techos conectados (`direct_fraction`) entran primero, y lo que no cabe sale por el 3 % de las celdas de calle más bajas del sector (sobrecarga). Lo conducido sale de la zona o, con `outlet`, vuelve a la superficie en ese punto.
+- **Red cloacal**: igual, con capacidad libre `capacity_mm_h` (0,5 mm/h ≈ 1,4 l/s·ha). Entran la fracción `rdii_fraction` de la lluvia (conexiones clandestinas) y el agua de las tapas anegadas por encima de `ingress_depth_m`, por orificio: Q = 0,6·a·(dx/espaciamiento)·√(2gh). Lo que no cabe desborda por las bocas más bajas. Ese volumen se marca en un trazador pasivo, transportado aguas abajo con el flujo como el sedimento, que da la capa `max_sewage` (fracción máxima de agua cloacal).
+- **Colapso**: el instante en que la red está llena (≥ 95 %) y no puede recibir todo lo que le llega. Se informan también las horas a capacidad y el llenado máximo.
+- **Informes**. Calles: profundidad máxima muestreada cada dx/2, km sobre 0,15 m (cordón), 0,3 m y 0,6 m, y peligrosidad H1–H6 de Smith et al. (2014), *Australian Rainfall and Runoff* (2019), con los máximos de h, v y h·v, que no son simultáneos (conservador). Barrios: superficie con h > 0,1 m y > 0,3 m, afectación (alta: ≥ 25 % anegado o ≥ 5 % con más de 0,3 m; media: ≥ 5 % o ≥ 0,1 ha con más de 0,3 m), calles, edificios y redes.
+
+Las redes son un modelo agregado (depósitos por barrio), no una red de caños con su línea piezométrica: no representan remansos ni la ubicación real de cada boca. Sirven para comparar escenarios (con o sin red pluvial, más capacidad, menos conexiones clandestinas), no para dimensionar obras.
+
 ## CPU / GPU
 
 El solver está escrito en [Taichi](https://www.taichi-lang.org/): el mismo código se compila para CPU (LLVM, multinúcleo) o GPU (Metal en macOS, CUDA o Vulkan). `device: auto` intenta usar la GPU y, si no hay, cae a CPU.

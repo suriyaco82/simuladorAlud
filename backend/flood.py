@@ -27,7 +27,7 @@ import time
 
 import numpy as np
 
-from . import dem, hydro, landcover, roads, scenario
+from . import dem, hydro, landcover, roads, scenario, urbanflood
 
 G = 9.81
 RHO_W = 1000.0
@@ -106,6 +106,9 @@ def prepare_terrain(p, progress):
     notes = scenario.condition_terrain(g, p)
     rnotes, g["roads_geo"] = roads.apply_embankments(g, p.get("roads"))
     notes += rnotes
+    unotes, uw = urbanflood.apply_streets(g, p)
+    notes += unotes
+    warnings += uw
     fl = {k: v for k, v in (p.get("flood") or {}).items() if v is not None}
     pits = fl.get("depressions", "carve")
     progress(stage="Analizando el terreno: direcciones de flujo y cuencas…")
@@ -218,7 +221,11 @@ def run_flood_job(job_dir, p, progress):
     if lu is not None:
         notes += lu["notes"]
         warnings += lu["warnings"]
-    sim = FloodSim(g, T, D, HY, p, fl, storm, soil, debris, progress, sel_ids, active, landuse=lu)
+    U = urbanflood.grid(g, p)
+    if U is not None:
+        notes += U["notes"]
+        warnings += U["warnings"]
+    sim = FloodSim(g, T, D, HY, p, fl, storm, soil, debris, progress, sel_ids, active, landuse=lu, urban_grid=U)
     warnings += sim.culvert_warnings
     if sim.culverts:
         notes.append(f"{len(sim.culverts)} alcantarilla{'s' if len(sim.culverts) > 1 else ''} bajo los terraplenes")
@@ -232,7 +239,9 @@ def run_flood_job(job_dir, p, progress):
         writer.add_array(k, {"terrain_pre": H_pre, "terrain_bed0": sim.z0.astype(np.float32),
                              "terrain_final": fields["bed_final"]}[k])
     for name in ("deposit", "erosion", "net_change", "max_depth", "max_speed", "max_pore", "arrival", "max_pressure",
-                 "intensity", "max_cv", "max_hv", "runoff_total", "wet_time"):
+                 "intensity", "max_cv", "max_hv", "runoff_total", "wet_time", "max_sewage"):
+        if name not in fields:
+            continue
         # la duración del anegamiento se guarda en horas (en `fields` queda en segundos para los informes)
         writer.add_array(name, fields[name] / 3600 if name == "wet_time" else fields[name])
     meta = writer.close()
@@ -322,6 +331,8 @@ def run_flood_job(job_dir, p, progress):
     result["impact"] = impact.impact_zones(result["domain"], fields, exposure.get("points"), p.get("exposure_points"))
     result["roads"] = roads.report(g, g.get("roads_geo"), fields, p.get("roads"))
     result["landuse"] = landcover.report(lu, fields, dx)
+    if U is not None:
+        result["urban"] = urbanflood.report(g, U, sim.net, fields, p)
     if sim.ga:
         result["flood"]["infiltration"] = sim.ga_info
     if sim.inflows:
@@ -333,9 +344,11 @@ def run_flood_job(job_dir, p, progress):
 
 
 class FloodSim:
-    def __init__(self, g, T, D, HY, p, fl, storm, soil, debris, progress, sel_ids=None, active=None, landuse=None):
+    def __init__(self, g, T, D, HY, p, fl, storm, soil, debris, progress, sel_ids=None, active=None, landuse=None,
+                 urban_grid=None):
         self.g, self.T, self.D, self.HY, self.p, self.fl = g, T, D, HY, p, fl
         self.lu = landuse
+        self.U = urban_grid
         self.sel_ids = set(sel_ids or [b["id"] for b in D["info"] if b["down"] == 0])
         # celdas donde llueve: las cuencas elegidas (fuera de ellas el agua solo llega desde aguas arriba)
         self.active = np.ones((g["ny"], g["nx"]), bool) if active is None else active
@@ -371,7 +384,12 @@ class FloodSim:
         for z in p.get("exposure") or []:
             if len(z.get("polygon") or []) >= 3:
                 urban |= scenario.zone_mask(g, z["polygon"])
+        if self.U is not None:
+            urban |= self.U["area"]
         n[urban] = float(fl.get("manning_urban", 0.03))
+        if self.U is not None:
+            # calzadas lisas bajo el cordón y manzanas rugosas por las edificaciones
+            urbanflood.apply_surface(self.U, n=n)
         self.urban = urban
         self.n2x = (0.5 * (n[:, :-1] + n[:, 1:])) ** 2
         self.n2y = (0.5 * (n[:-1, :] + n[1:, :])) ** 2
@@ -394,6 +412,8 @@ class FloodSim:
         CN = np.where(slope > math.radians(float(so.get("max_slope_deg", hydro.SOIL_DEFAULTS["max_slope_deg"]))),
                       np.maximum(CN, 92.0), CN)
         CN[urban] = float(fl.get("cn_urban", 92.0))
+        if self.U is not None:
+            urbanflood.apply_surface(self.U, CN=CN)
         self.S_ret = 25400.0 / CN - 254.0
         self.ia = float(st.get("ia_ratio", 0.2))
         self._init_infiltration(urban)
@@ -438,6 +458,7 @@ class FloodSim:
         self._init_tracers(db, so)
         self._init_gauges()
         self.culvert_warnings = self._init_culverts()
+        self.net = urbanflood.UrbanNet(self.U, dx, g["frame"], nx) if self.U is not None else None
 
     # ───────────────────────── infiltración continua (Green-Ampt), entradas de caudal y alcantarillas
     def _init_infiltration(self, urban):
@@ -460,7 +481,10 @@ class FloodSim:
         Ks = np.full((self.ny, self.nx), ks)
         if self.lu is not None:
             Ks *= landcover.per_cell(self.lu, "ks_factor", 1.0)
-        Ks[urban] *= 0.05
+        if self.U is not None:
+            Ks *= urbanflood.ks_factor(self.U)
+        else:
+            Ks[urban] *= 0.05
         self.Ks, self.psi_dt = Ks, psi * dtheta
         # capacidad hasta la napa (m de agua); sin napa, sin límite
         self.F_cap = np.full((self.ny, self.nx), dtheta * float(wt) if wt is not None else np.inf)
@@ -679,6 +703,9 @@ class FloodSim:
         g_dx = G / dx
         h = np.zeros((ny, nx))
         hs = np.zeros((ny, nx))
+        # agua mezclada con líquido cloacal (desbordes de la red cloacal), transportada como trazador pasivo
+        hc = np.zeros((ny, nx)) if self.net is not None and self.net.sewer else None
+        max_sew = np.zeros((ny, nx), np.float32) if hc is not None else None
         qx = np.zeros((ny, nx + 1))
         qy = np.zeros((ny + 1, nx))
         pe_prev = np.zeros((ny, nx))
@@ -767,6 +794,8 @@ class FloodSim:
                 next_frame += frame_dt
             if t >= next_gauge - 1e-6:
                 self._record_gauges(t, h, qcx, qcy, cv, qx, qy)
+                if self.net is not None:
+                    self.net.record(t)
                 next_gauge += gauge_dt
                 # intensidad: crecida (Cv < 0,2) por profundidad y h·v; barro/detritos por h y v (Hürlimann)
                 sp = np.hypot(u, v)
@@ -798,6 +827,7 @@ class FloodSim:
 
             eta = z + h
             cv = np.where(h > 1e-3, hs / np.maximum(h, 1e-9), 0.0)
+            sc = np.where(h > 1e-3, hc / np.maximum(h, 1e-9), 0.0) if hc is not None else None
             ci = np.clip((cv * (255 / CV_MAX)).astype(np.int32), 0, 255)
 
             # ── caras x interiores
@@ -874,6 +904,14 @@ class FloodSim:
             k = dt / dx
             dh = k * (qx[:, :-1] - qx[:, 1:] + qy[:-1, :] - qy[1:, :])
             dhs = k * (qx[:, :-1] * cvx[:, :-1] - qx[:, 1:] * cvx[:, 1:] + qy[:-1, :] * cvy[:-1, :] - qy[1:, :] * cvy[1:, :])
+            if hc is not None:
+                scx = np.empty((ny, nx + 1))
+                scx[:, 1:-1] = np.where(qx[:, 1:-1] > 0, sc[:, :-1], sc[:, 1:])
+                scx[:, 0], scx[:, -1] = sc[:, 0], sc[:, -1]
+                scy = np.empty((ny + 1, nx))
+                scy[1:-1, :] = np.where(qy[1:-1, :] > 0, sc[:-1, :], sc[1:, :])
+                scy[0, :], scy[-1, :] = sc[0, :], sc[-1, :]
+                hc += k * (qx[:, :-1] * scx[:, :-1] - qx[:, 1:] * scx[:, 1:] + qy[:-1, :] * scy[:-1, :] - qy[1:, :] * scy[1:, :])
             outflow += float((-qx[:, 0].sum() + qx[:, -1].sum() - qy[0, :].sum() + qy[-1, :].sum()) * dt * dx)
             h += dh
             hs += dhs
@@ -881,9 +919,11 @@ class FloodSim:
             np.clip(hs, 0, CV_MAX * h, out=hs)
 
             # ── lluvia: efectiva por SCS-CN, o total con infiltración continua (Green-Ampt)
+            dP = 0.0
             if t < self.rain_t[-1]:
                 Pn = float(np.interp(t + dt, self.rain_t, self.rain_c))
                 if Pn > rain_prev:
+                    dP = Pn - rain_prev
                     if self.ga:
                         h[self.active] += (Pn - rain_prev) / 1000.0
                     else:
@@ -911,8 +951,12 @@ class FloodSim:
                 evap_vol += float(e.sum()) * A
             if self.culverts:
                 culv_vol += roads.culvert_step(h.ravel(), z.ravel(), self.culverts, dt, A)
-            if self.ga or self.evap > 0:
+            if self.net is not None:
+                self.net.step(h, hc, dP, dt, t)
+            if self.ga or self.evap > 0 or self.net is not None:
                 np.clip(hs, 0, CV_MAX * h, out=hs)
+            if hc is not None:
+                np.clip(hc, 0, h, out=hc)
 
             # ── erosión y depósito (equilibrio de Takahashi)
             qcx, qcy, u, v = cell_velocity(h, qx, qy)
@@ -953,6 +997,8 @@ class FloodSim:
             np.maximum(max_hv, h * spw, out=max_hv, casting="unsafe")
             np.maximum(max_pd, (RHO_W + cv * (RHO_S - RHO_W)) * spw ** 2 / 1000, out=max_pd, casting="unsafe")
             wet_time[h > 0.1] += dt
+            if hc is not None:
+                np.maximum(max_sew, np.where(h > 0.05, hc / np.maximum(h, 1e-9), 0), out=max_sew, casting="unsafe")
             newly = (arrival < 0) & (h > h_arr)
             arrival[newly] = t
             now = time.time()
@@ -985,6 +1031,8 @@ class FloodSim:
             wet_time=wet_time,
             bed_final=z.astype(np.float32),
         )
+        if max_sew is not None:
+            fields["max_sewage"] = max_sew
         # trazadores: resumen
         b_mob = int(self.b_moved.sum())
         b_dist = np.hypot(self.bx - self.b_x0, self.by - self.b_y0)
@@ -1005,6 +1053,11 @@ class FloodSim:
             runoff_vol = max(rain_vol + inflow_vol - infil_vol - evap_vol, 0.0)
         else:
             runoff_vol = float(pe_prev.sum()) / 1000 * A
+        net = self.net
+        drained = 0.0
+        if net is not None:
+            # lo que las redes llevaron fuera de la zona (la pluvial con desagüe marcado lo devuelve a la superficie)
+            drained = float(net.sw["conveyed"].sum()) + (float(net.st["conveyed"].sum()) if net.outlet is None else 0.0)
         fp = max_h > 0.1
         reach = 0.0
         totals = dict(
@@ -1012,6 +1065,7 @@ class FloodSim:
             infiltration_m3=round(infil_vol if self.ga else rain_vol - runoff_vol, 0),
             runoff_coeff=round(min(runoff_vol / (rain_vol + inflow_vol), 1.0), 3) if rain_vol + inflow_vol > 0 else 0,
             inflow_m3=round(inflow_vol, 0), evaporation_m3=round(evap_vol, 0), culvert_m3=round(culv_vol, 0),
+            drained_m3=round(drained, 0),
             infiltration_method="green_ampt" if self.ga else "scs",
             saturated_area_km2=round(float((self.F >= self.F_cap - 1e-6).sum()) * A / 1e6, 2) if self.ga else None,
             flooded_24h_km2=round(float((wet_time >= 86400).sum()) * A / 1e6, 2),

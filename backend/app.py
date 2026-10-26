@@ -257,6 +257,63 @@ class Landuse(BaseModel):
     classes: dict[str, dict] | None = Field(None, description="Por clase: cn, manning, ks_factor")
 
 
+class UrbanStreet(BaseModel):
+    id: int | str | None = None
+    cls: str = "calle"
+    name: str | None = None
+    paved: bool | None = Field(None, description="Pavimentada; None = sin dato (se usa assume_paved)")
+    line: list[tuple[float, float]] = Field(..., min_length=2)
+
+
+class Barrio(BaseModel):
+    name: str | None = None
+    polygon: list[tuple[float, float]] | None = Field(None, description="Límite del barrio; sin límite, un punto")
+    point: tuple[float, float] | None = None
+    storm_drain: bool | None = Field(None, description="Tiene red pluvial; None = el valor general")
+    design_mm_h: float | None = Field(None, gt=0, le=300, description="Capacidad de la red pluvial del barrio (mm/h)")
+
+
+class Canal(BaseModel):
+    name: str | None = None
+    line: list[tuple[float, float]] = Field(..., min_length=2)
+    depth_m: float = Field(1.5, gt=0, le=10)
+    width_m: float = Field(4.0, gt=0.5, le=100)
+
+
+class StormDrain(BaseModel):
+    """Red pluvial: depósito por barrio con capacidad de conducción y volumen de conductos."""
+    enabled: bool | None = Field(None, description="Hay red pluvial (por defecto en todos los barrios)")
+    design_mm_h: float | None = Field(None, gt=0, le=300, description="Capacidad expresada como lluvia sobre el barrio (mm/h)")
+    storage_mm: float | None = Field(None, ge=0, le=100, description="Volumen de conductos como lámina sobre el barrio (mm)")
+    inlet_m_per_100m: float | None = Field(None, ge=0, le=50, description="Metros de boca de tormenta cada 100 m de calle")
+    direct_fraction: float | None = Field(None, ge=0, le=1, description="Fracción de la lluvia que entra directo (techos conectados)")
+    outlet: tuple[float, float] | None = Field(None, description="Descarga [lon, lat] (canal o río); vacío = fuera de la zona")
+
+
+class Sewer(BaseModel):
+    """Red cloacal: capacidad ociosa para agua de lluvia; desborda por las bocas de registro más bajas."""
+    enabled: bool | None = None
+    capacity_mm_h: float | None = Field(None, ge=0, le=50, description="Capacidad libre para agua de lluvia (mm/h sobre el barrio)")
+    storage_mm: float | None = Field(None, ge=0, le=50)
+    rdii_fraction: float | None = Field(None, ge=0, le=0.5, description="Fracción de la lluvia por conexiones pluviales clandestinas")
+    manhole_spacing_m: float | None = Field(None, ge=10, le=1000)
+    lid_area_m2: float | None = Field(None, ge=0, le=1, description="Área de entrada por tapa de registro anegada (m²)")
+    ingress_depth_m: float | None = Field(None, ge=0, le=1)
+
+
+class Urban(BaseModel):
+    """Inundación urbana: calles pavimentadas con cordón, barrios, redes pluvial y cloacal."""
+    streets: list[UrbanStreet] | None = None
+    barrios: list[Barrio] | None = None
+    canals: list[Canal] | None = None
+    classes: dict[str, dict] | None = Field(None, description="Por categoría de calle: width_m, include")
+    surface: dict[str, dict] | None = Field(None, description="paved / unpaved / blocks: cn, manning, ks_factor")
+    curb_m: float | None = Field(None, ge=0, le=0.5, description="Altura del cordón: la calzada queda por debajo de las manzanas")
+    assume_paved: bool | None = Field(None, description="Calles sin dato de superficie: pavimentadas")
+    storm: StormDrain | None = None
+    sewer: Sewer | None = None
+
+
 class Outlet(BaseModel):
     lon: float
     lat: float
@@ -349,6 +406,7 @@ class SimRequest(BaseModel):
     inflows: list[Inflow] | None = None
     roads: Roads | None = None
     landuse: Landuse | None = None
+    urban: Urban | None = None
     # solo motor de partículas
     damping: float = Field(0.985, ge=0.8, le=1.0)
     dt: float = Field(0.35, gt=0.05, le=2.0)
@@ -543,12 +601,26 @@ def roads_osm(b: BBox):
         raise HTTPException(502, str(e))
 
 
+@app.post("/api/urban/osm")
+def urban_osm(b: BBox):
+    """Calles con su superficie, barrios y elementos de desagüe de OpenStreetMap dentro del bbox."""
+    from . import roads, urbanflood
+    if (b.east - b.west) > 0.3 or (b.north - b.south) > 0.3:
+        raise HTTPException(400, "Zona demasiado grande para cargar calles (máx. 0,3° por lado)")
+    try:
+        return urbanflood.fetch_osm(b.west, b.south, b.east, b.north)
+    except roads.RoadsError as e:
+        raise HTTPException(502, str(e))
+
+
 @app.get("/api/plain/defaults")
 def plain_defaults():
     """Tablas para el panel de llanura: texturas de suelo, clases de uso del suelo y de caminos."""
-    from . import flood, landcover, roads
+    from . import flood, landcover, roads, urbanflood
     return {"textures": flood.SOIL_TEXTURES, "landuse": landcover.CLASSES, "roads": roads.CLASSES,
-            "road_thresholds": [dict(depth_m=t, key=k, name=n) for t, k, n in roads.THRESHOLDS]}
+            "road_thresholds": [dict(depth_m=t, key=k, name=n) for t, k, n in roads.THRESHOLDS],
+            "urban": dict(streets=urbanflood.STREET_CLASSES, surface=urbanflood.SURFACE, storm=urbanflood.STORM,
+                          sewer=urbanflood.SEWER, hazard=[dict(k=k, name=n) for k, *_, n in urbanflood.HAZARD])}
 
 
 @app.get("/api/capabilities")
@@ -670,7 +742,8 @@ def basins(req: SimRequest, storm: bool = True):
     p["bbox"] = b.model_dump()
     dx, _ = flood.flood_dx(p)
     key = json.dumps([req.dataset, p["bbox"], dx, p.get("flood"), p.get("lakes"), p.get("burn_channels"), p.get("dams"),
-                      p.get("breach"), p.get("roads")], sort_keys=True, default=str)
+                      p.get("breach"), p.get("roads"), (p.get("urban") or {}).get("streets"),
+                      (p.get("urban") or {}).get("canals"), (p.get("urban") or {}).get("curb_m")], sort_keys=True, default=str)
     try:
         if key not in _terrain_cache:
             _terrain_cache.clear()
